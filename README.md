@@ -9,6 +9,7 @@ Built with Express and the official x402 v2 packages (`@x402/express`, `@x402/co
 | `GET /health` | free | mode, network, facilitator (`cdp`/`x402.org`/`custom`), price, item count, newest id, ingest on/off |
 | `GET /news/sample` | free | newest item, text truncated to 80 chars (discovery) |
 | `GET /news/latest?limit=N` | **x402: $0.003 USDC** | newest first, default 20, max 50 |
+| `GET /openapi.json` | free, CORS `*` | OpenAPI 3.1 discovery doc for x402scan / agentcash (network, price, payTo from live config) |
 | `POST /ingest` | `Authorization: Bearer <INGEST_TOKEN>` | one item or an array; dedupe by id; 401 bad token; 404 if `INGEST_TOKEN` unset |
 
 Default network: **Base mainnet `eip155:8453`** (USDC `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`, resolved
@@ -41,6 +42,7 @@ best-effort; on startup and whenever the file changes it is re-read.
 | `INGEST_TOKEN` | — | enables `POST /ingest` |
 | `PORT` / `HOST` | `4021` / `0.0.0.0` | Render sets `PORT` |
 | `NEWS_FILE` | `data/news.jsonl` | |
+| `PUBLIC_URL` | — | `servers[0].url` in `/openapi.json`; default = request proto/host |
 | `DEV_MODE` | — | `1` = run without payments (local only) |
 
 ## Run locally
@@ -68,3 +70,11 @@ For durable history use a paid instance with a persistent disk or an external DB
 ## Paying client
 Use `@x402/fetch` or `@x402/axios` with a Base wallet holding USDC (mainnet), or testnet USDC on Base Sepolia
 (https://faucet.circle.com) when running with `X402_NETWORK=eip155:84532`.
+
+## Discovery (x402scan)
+`GET /openapi.json` follows the agentcash/x402scan discovery spec v1: `info.x-guidance`, `info.contact.email`,
+and on the paid operation `responses.402` plus structured
+`x-payment-info: {"price":{"mode":"fixed","currency":"USD","amount":"0.003"},"protocols":[{"x402":{...}}]}`.
+The runtime 402 challenge also carries the Bazaar extension (`extensions.bazaar`, input/output schema).
+Check with: `npx @agentcash/discovery discover <origin> -v` and `npx @agentcash/discovery check <origin>/news/latest`.
+Register at https://www.x402scan.com (Add Server → origin URL).
