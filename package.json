@@ -1,0 +1,22 @@
+{
+  "name": "x402-news",
+  "version": "0.1.0",
+  "description": "x402-paid MarketTwits news API prototype",
+  "main": "server.mjs",
+  "scripts": {
+    "start": "node server.mjs",
+    "dev": "DEV_MODE=1 node server.mjs"
+  },
+  "license": "UNLICENSED",
+  "type": "module",
+  "dependencies": {
+    "@x402/core": "^2.28.0",
+    "@x402/evm": "^2.28.0",
+    "@x402/express": "^2.28.0",
+    "express": "^5.3.0"
+  },
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  }
+}

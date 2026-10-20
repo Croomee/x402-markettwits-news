@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: x402-news
+    runtime: node
+    plan: free
+    buildCommand: npm ci
+    startCommand: node server.mjs
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: PAY_TO_ADDRESS
+        sync: false
+      - key: X402_NETWORK
+        value: eip155:84532
+      - key: FACILITATOR_URL
+        value: https://x402.org/facilitator
+      - key: PRICE
+        value: "$0.003"
+      - key: INGEST_TOKEN
+        generateValue: true

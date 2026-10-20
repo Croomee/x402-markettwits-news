@@ -1,0 +1,14 @@
+node_modules/
+.env
+data/
+*.log
+*.pid
+public_url.txt
+tunnel_session.log
+# local box ops (tunnel/watchdog), not needed on Render
+askpass.sh
+tunnel.sh
+tunnel*.log
+tunnel*.pid
+start.sh
+ensure_running.sh
