@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import { paymentMiddleware, x402ResourceServer } from "@x402/express";
 import { HTTPFacilitatorClient } from "@x402/core/server";
 import { ExactEvmScheme } from "@x402/evm/exact/server";
+import { createFacilitatorConfig } from "@coinbase/x402";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 4021);
@@ -17,8 +18,13 @@ const HOST = process.env.HOST || "0.0.0.0";
 const NEWS_FILE = path.resolve(HERE, process.env.NEWS_FILE || "data/news.jsonl");
 const PAY_TO = (process.env.PAY_TO_ADDRESS || "").trim();
 const DEV_MODE = process.env.DEV_MODE === "1";
-const NETWORK = process.env.X402_NETWORK || "eip155:84532"; // Base Sepolia
+const NETWORK = process.env.X402_NETWORK || "eip155:8453"; // Base mainnet (eip155:84532 = Base Sepolia)
 const FACILITATOR_URL = process.env.FACILITATOR_URL || "https://x402.org/facilitator";
+const CDP_API_KEY_ID = (process.env.CDP_API_KEY_ID || "").trim();
+const CDP_API_KEY_SECRET = (process.env.CDP_API_KEY_SECRET || "").trim();
+const USE_CDP = Boolean(CDP_API_KEY_ID && CDP_API_KEY_SECRET);
+const FACILITATOR_TYPE = USE_CDP ? "cdp" : (FACILITATOR_URL.includes("x402.org") ? "x402.org" : "custom");
+const TESTNETS = new Set(["eip155:84532"]);
 const PRICE = process.env.PRICE || "$0.003";
 const INGEST_TOKEN = (process.env.INGEST_TOKEN || "").trim();
 const MAX_ITEMS = 500;
@@ -30,6 +36,11 @@ if (PAY_TO && !/^0x[0-9a-fA-F]{40}$/.test(PAY_TO)) {
 if (!PAY_TO && !DEV_MODE) {
   console.error("PAY_TO_ADDRESS is not set. Refusing to start.\n" +
     "Set PAY_TO_ADDRESS=0x... for paid mode, or DEV_MODE=1 for an UNPAID local dev server.");
+  process.exit(1);
+}
+if (PAY_TO && !USE_CDP && FACILITATOR_TYPE === "x402.org" && !TESTNETS.has(NETWORK)) {
+  console.error(`Network ${NETWORK} needs a mainnet facilitator: set CDP_API_KEY_ID and CDP_API_KEY_SECRET ` +
+    "(x402.org facilitator is testnet-only), or set X402_NETWORK=eip155:84532 for testnet.");
   process.exit(1);
 }
 const MODE = PAY_TO ? "paid" : "dev-unpaid";
@@ -105,7 +116,7 @@ app.set("trust proxy", true); // behind Render / tunnel: use X-Forwarded-Proto/H
 
 app.get("/health", (_req, res) => {
   const items = readNews();
-  res.json({ ok: true, mode: MODE, network: NETWORK, price: PRICE, items: items.length, newest_id: items[0]?.id ?? null, ingest: INGEST_TOKEN ? "enabled" : "disabled" });
+  res.json({ ok: true, mode: MODE, network: NETWORK, facilitator: FACILITATOR_TYPE, price: PRICE, items: items.length, newest_id: items[0]?.id ?? null, ingest: INGEST_TOKEN ? "enabled" : "disabled" });
 });
 
 app.get("/news/sample", (_req, res) => {
@@ -137,7 +148,9 @@ app.post("/ingest", express.json({ limit: "2mb" }), (req, res) => {
 });
 
 if (MODE === "paid") {
-  const facilitator = new HTTPFacilitatorClient({ url: FACILITATOR_URL });
+  // CDP: @coinbase/x402 createFacilitatorConfig -> { url, createAuthHeaders } (per-request CDP JWTs)
+  const facilitator = new HTTPFacilitatorClient(
+    USE_CDP ? createFacilitatorConfig(CDP_API_KEY_ID, CDP_API_KEY_SECRET) : { url: FACILITATOR_URL });
   const resourceServer = new x402ResourceServer(facilitator).register(NETWORK, new ExactEvmScheme());
   app.use(paymentMiddleware({
     "GET /news/latest": {
@@ -158,4 +171,4 @@ app.get("/news/latest", (req, res) => {
   res.json({ count: items.length, items });
 });
 
-app.listen(PORT, HOST, () => console.log(`x402-news listening on ${HOST}:${PORT} mode=${MODE} network=${NETWORK} price=${PRICE} payTo=${PAY_TO || "-"} ingest=${INGEST_TOKEN ? "on" : "off"} file=${NEWS_FILE}`));
+app.listen(PORT, HOST, () => console.log(`x402-news listening on ${HOST}:${PORT} mode=${MODE} network=${NETWORK} facilitator=${FACILITATOR_TYPE} price=${PRICE} payTo=${PAY_TO || "-"} ingest=${INGEST_TOKEN ? "on" : "off"} file=${NEWS_FILE}`));
