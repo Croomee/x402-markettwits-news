@@ -162,59 +162,81 @@ const FAVICON_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"
   '<text x="32" y="43" font-family="Arial,sans-serif" font-size="30" font-weight="700" fill="#fff" text-anchor="middle">MT</text></svg>';
 app.get(["/favicon.svg", "/favicon.ico"], (_req, res) => res.type("image/svg+xml").set("Cache-Control", "public, max-age=86400").send(FAVICON_SVG));
 
+// ---------- paid route definitions (shared by x402 middleware, Bazaar extension and OpenAPI) ----------
+const LIMIT_PARAM = { type: "integer", minimum: 1, maximum: 50, default: 20, description: "Number of items (newest first)" };
+const Q_PARAM = { type: "string", minLength: 1, maxLength: 100,
+  description: "Keywords (case-insensitive). Several words = all must match. Hashtags match with or without '#', e.g. 'oil', '#Fed rates'." };
+const EXAMPLE_ITEM = { id: 389638, source_url: "https://t.me/markettwits/389638", published_at: "2026-10-20T12:20:00Z",
+  importance: "high", text_en: "French government bond yields near 24-year high ahead of protests (Reuters)" };
+const PAID_ROUTES = [
+  { path: "/news/latest", operationId: "getLatestNews", summary: "Latest translated MarketTwits news (newest first)",
+    description: "Latest translated MarketTwits news (newest first), limit 1-50",
+    params: { limit: LIMIT_PARAM }, required: [], example: { limit: 20 } },
+  { path: "/news/important", operationId: "getImportantNews", summary: "High-importance news only (newest first)",
+    description: "Only importance=high MarketTwits news (newest first), limit 1-50",
+    params: { limit: LIMIT_PARAM }, required: [], example: { limit: 20 } },
+  { path: "/news/search", operationId: "searchNews", summary: "Keyword search in translated news (newest first)",
+    description: "Case-insensitive keyword search in translated MarketTwits news (all words must match), limit 1-50",
+    params: { q: Q_PARAM, limit: LIMIT_PARAM }, required: ["q"], example: { q: "oil", limit: 20 }, badRequest: true },
+];
+const LIST_OUTPUT_SCHEMA = (itemSchema) => ({
+  type: "object", required: ["count", "items"],
+  properties: { count: { type: "integer" }, items: { type: "array", items: itemSchema } },
+});
+
 app.get("/openapi.json", async (req, res) => {
   const a = await resolveAsset();
   const host = req.host; // honours X-Forwarded-Host (trust proxy)
   const server = PUBLIC_URL || (host ? `${req.protocol}://${host}` : DEFAULT_PUBLIC_URL);
   const paid = MODE === "paid";
+  const paymentInfo = {
+    price: { mode: "fixed", currency: "USD", amount: PRICE_USD },
+    protocols: [{ x402: { network: NETWORK, scheme: "exact", payTo: PAY_TO, asset: a.asset, amount: a.amount } }],
+  };
+  const paidPaths = {};
+  for (const r of PAID_ROUTES) {
+    paidPaths[r.path] = { get: {
+      operationId: r.operationId, summary: r.summary, description: r.description, tags: ["news"], security: [],
+      parameters: Object.entries(r.params).map(([name, schema]) => {
+        const { description, ...sch } = schema;
+        return { name, in: "query", required: r.required.includes(name), description, schema: sch };
+      }),
+      ...(paid ? { "x-payment-info": paymentInfo } : {}),
+      responses: {
+        200: { description: "News items (newest first); empty items array when nothing matches",
+          content: { "application/json": { schema: LIST_OUTPUT_SCHEMA({ $ref: "#/components/schemas/NewsItem" }) } } },
+        ...(r.badRequest ? { 400: { description: "Missing or invalid q (1-100 chars). Returned before payment when a payment is attached or q is invalid.",
+          content: { "application/json": { schema: { type: "object", properties: { error: { type: "string" } } } } } } } : {}),
+        402: {
+          description: "Payment Required. x402 v2 challenge in the PAYMENT-REQUIRED response header (base64 JSON).",
+          headers: { "PAYMENT-REQUIRED": { description: "Base64-encoded x402 PaymentRequired object", schema: { type: "string" } } },
+        },
+      },
+    } };
+  }
   const doc = {
     openapi: "3.1.0",
     info: {
       title: "MarketTwits News (English) — x402",
       version: "1.0.0",
-      description: "English translations of market-moving news from the Russian Telegram channel MarketTwits " +
-        "(t.me/markettwits): macro, central banks, commodities, geopolitics, equities and crypto. " +
-        "Items are tagged high/medium importance and updated every few minutes.",
-      "x-guidance": `Call GET /news/latest?limit=N (N 1-50, default 20). It is paid per request via x402: ` +
-        `${PRICE} USDC on ${NETWORK}${paid ? ` to ${PAY_TO}` : ""}. The first call returns HTTP 402 with a PAYMENT-REQUIRED ` +
-        `header; sign it with an x402 client (e.g. @x402/fetch) and retry. Response: {count, items:[{id, source_url, ` +
-        `published_at, importance, text_en, posted_to_x, buffer_post_id}]}, newest first. Free: GET /news/sample ` +
-        `(one truncated item) and GET /health.`,
+      description: "Real-time English translations of MarketTwits (top Russian financial Telegram channel). Covers macro, " +
+        "central banks, oil/commodities, geopolitics, equities and crypto. Items are tagged high/medium importance and " +
+        "updated every few minutes. Ideal for trading bots and news agents.",
+      "x-guidance": `Three paid endpoints, ${PRICE} USDC each per request via x402 (scheme exact, network ${NETWORK}` +
+        `${paid ? `, payTo ${PAY_TO}` : ""}). ` +
+        `GET /news/latest?limit=N - full feed (high+medium), use for polling/monitoring all market news. ` +
+        `GET /news/important?limit=N - only importance=high, use when you want market-moving headlines only. ` +
+        `GET /news/search?q=WORDS&limit=N - case-insensitive keyword search (all words must match; '#oil' and 'oil' both work), ` +
+        `use for a topic/ticker/country (e.g. q=oil, q=Fed rates, q=BTC). limit is 1-50 (default 20); results newest first. ` +
+        `An unpaid call returns HTTP 402 with a PAYMENT-REQUIRED header (base64 x402 v2 challenge); pay with an x402 client ` +
+        `(e.g. @x402/fetch) and retry. Invalid q (empty or >100 chars) returns 400 before any payment; no match returns 200 with items []. ` +
+        `Response: {count, items:[{id, source_url, published_at, importance, text_en, posted_to_x, buffer_post_id}]}. ` +
+        `Free: GET /news/sample (one truncated item), GET /health.`,
       contact: { email: "whale2003@proton.me" },
     },
     servers: [{ url: server }],
     paths: {
-      "/news/latest": {
-        get: {
-          operationId: "getLatestNews",
-          summary: "Latest translated MarketTwits news (newest first)",
-          tags: ["news"],
-          security: [],
-          parameters: [{
-            name: "limit", in: "query", required: false, description: "Number of items to return",
-            schema: { type: "integer", minimum: 1, maximum: 50, default: 20 },
-          }],
-          ...(paid ? {
-            "x-payment-info": {
-              price: { mode: "fixed", currency: "USD", amount: PRICE_USD },
-              protocols: [{ x402: { network: NETWORK, scheme: "exact", payTo: PAY_TO, asset: a.asset, amount: a.amount } }],
-            },
-          } : {}),
-          responses: {
-            200: {
-              description: "News items",
-              content: { "application/json": { schema: {
-                type: "object", required: ["count", "items"],
-                properties: { count: { type: "integer" }, items: { type: "array", items: { $ref: "#/components/schemas/NewsItem" } } },
-              } } },
-            },
-            402: {
-              description: "Payment Required. x402 v2 challenge in the PAYMENT-REQUIRED response header (base64 JSON).",
-              headers: { "PAYMENT-REQUIRED": { description: "Base64-encoded x402 PaymentRequired object", schema: { type: "string" } } },
-            },
-          },
-        },
-      },
+      ...paidPaths,
       "/news/sample": {
         get: {
           operationId: "getNewsSample", summary: "Free sample: newest item with truncated text", tags: ["news"], security: [],
@@ -264,48 +286,73 @@ app.post("/ingest", express.json({ limit: "2mb" }), (req, res) => {
     .json({ added: added.length, duplicates, errors, total: store.size });
 });
 
+// /news/search: reject invalid q BEFORE payment. Missing q without a payment attached still gets the 402
+// challenge so discovery probes (x402scan) can read it; with a payment attached it is rejected (never charged).
+function parseQ(raw) {
+  if (typeof raw !== "string") return null;
+  const q = raw.trim();
+  return q.length >= 1 && q.length <= 100 && /[^#\s]/.test(q) ? q : null;
+}
+app.get("/news/search", (req, res, next) => {
+  const hasPayment = Boolean(req.get("payment-signature") || req.get("x-payment"));
+  const present = req.query.q !== undefined;
+  if (parseQ(req.query.q) === null && (present || hasPayment)) {
+    return res.status(400).json({ error: "q is required (1-100 characters)" });
+  }
+  next();
+});
+
 if (MODE === "paid") {
   // CDP: @coinbase/x402 createFacilitatorConfig -> { url, createAuthHeaders } (per-request CDP JWTs)
   const facilitator = new HTTPFacilitatorClient(
     USE_CDP ? createFacilitatorConfig(CDP_API_KEY_ID, CDP_API_KEY_SECRET) : { url: FACILITATOR_URL });
   const resourceServer = new x402ResourceServer(facilitator).register(NETWORK, new ExactEvmScheme())
     .registerExtension(bazaarResourceServerExtension);
-  app.use(paymentMiddleware({
-    "GET /news/latest": {
+  const routes = {};
+  for (const r of PAID_ROUTES) {
+    routes[`GET ${r.path}`] = {
       accepts: [{ scheme: "exact", price: PRICE, network: NETWORK, payTo: PAY_TO, maxTimeoutSeconds: 60 }],
-      description: "Latest translated MarketTwits news (newest first), limit 1-50",
+      description: r.description,
       mimeType: "application/json",
       // Bazaar discovery metadata in the 402 challenge (input/output schema for x402scan / facilitator catalogs)
       extensions: {
         ...declareDiscoveryExtension({
-          input: { limit: 20 },
-          inputSchema: {
-            properties: { limit: { type: "integer", minimum: 1, maximum: 50, default: 20, description: "Number of items (newest first)" } },
-            required: [],
-          },
-          output: {
-            example: { count: 1, items: [{ id: 389638, source_url: "https://t.me/markettwits/389638",
-              published_at: "2026-10-20T12:20:00Z", importance: "high",
-              text_en: "French government bond yields near 24-year high ahead of protests (Reuters)" }] },
-            schema: {
-              type: "object", required: ["count", "items"],
-              properties: { count: { type: "integer" }, items: { type: "array", items: NEWS_ITEM_SCHEMA_NOFMT } },
-            },
-          },
+          input: r.example,
+          inputSchema: { properties: r.params, required: r.required },
+          output: { example: { count: 1, items: [EXAMPLE_ITEM] }, schema: LIST_OUTPUT_SCHEMA(NEWS_ITEM_SCHEMA_NOFMT) },
         }),
       },
-    },
-  }, resourceServer));
+    };
+  }
+  app.use(paymentMiddleware(routes, resourceServer));
 } else {
   app.use((_req, res, next) => { res.set("X-Dev-Mode", "unpaid"); next(); });
 }
 
-app.get("/news/latest", (req, res) => {
-  let limit = parseInt(req.query.limit ?? "20", 10);
+function parseLimit(v) {
+  let limit = parseInt(v ?? "20", 10);
   if (!Number.isFinite(limit) || limit < 1) limit = 20;
-  limit = Math.min(limit, 50);
-  const items = readNews().slice(0, limit).map(publicItem);
-  res.json({ count: items.length, items });
+  return Math.min(limit, 50);
+}
+const sendItems = (res, items) => res.json({ count: items.length, items: items.map(publicItem) });
+
+app.get("/news/latest", (req, res) => sendItems(res, readNews().slice(0, parseLimit(req.query.limit))));
+
+app.get("/news/important", (req, res) =>
+  sendItems(res, readNews().filter((i) => i.importance === "high").slice(0, parseLimit(req.query.limit))));
+
+app.get("/news/search", (req, res) => {
+  const q = parseQ(req.query.q);
+  if (q === null) return res.status(400).json({ error: "q is required (1-100 characters)" }); // no settlement on 4xx
+  const terms = q.toLowerCase().split(/\s+/).map((t) => t.replace(/^#+/, "")).filter(Boolean);
+  if (!terms.length) return res.status(400).json({ error: "q must contain at least one word" });
+  const limit = parseLimit(req.query.limit);
+  const out = [];
+  for (const it of readNews()) {
+    const text = it.text_en.toLowerCase();
+    if (terms.every((t) => text.includes(t))) { out.push(it); if (out.length >= limit) break; }
+  }
+  sendItems(res, out);
 });
 
 app.listen(PORT, HOST, () => console.log(`x402-news listening on ${HOST}:${PORT} mode=${MODE} network=${NETWORK} facilitator=${FACILITATOR_TYPE} price=${PRICE} payTo=${PAY_TO || "-"} ingest=${INGEST_TOKEN ? "on" : "off"} file=${NEWS_FILE}`));

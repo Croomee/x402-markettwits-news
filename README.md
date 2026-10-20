@@ -9,6 +9,8 @@ Built with Express and the official x402 v2 packages (`@x402/express`, `@x402/co
 | `GET /health` | free | mode, network, facilitator (`cdp`/`x402.org`/`custom`), price, item count, newest id, ingest on/off |
 | `GET /news/sample` | free | newest item, text truncated to 80 chars (discovery) |
 | `GET /news/latest?limit=N` | **x402: $0.003 USDC** | newest first, default 20, max 50 |
+| `GET /news/important?limit=N` | **x402: $0.003 USDC** | only `importance=high`, newest first |
+| `GET /news/search?q=WORDS&limit=N` | **x402: $0.003 USDC** | case-insensitive, all words must match, `#tag` = `tag`; `q` 1-100 chars. Invalid `q` → 400 before payment (missing `q` without a payment → 402 so discovery probes work); no match → 200 `items: []` |
 | `GET /openapi.json` | free, CORS `*` | OpenAPI 3.1 discovery doc for x402scan / agentcash (network, price, payTo from live config) |
 | `POST /ingest` | `Authorization: Bearer <INGEST_TOKEN>` | one item or an array; dedupe by id; 401 bad token; 404 if `INGEST_TOKEN` unset |
 
