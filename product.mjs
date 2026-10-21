@@ -2,6 +2,9 @@
 // Every failure throws UpstreamError -> the route answers 502, which the x402 v2 middleware never settles.
 // Optional proxy (proxy-config.mjs) is used for these marketplace fetches only.
 import { parseProxyEnv, proxyDispatcher, maskSecrets, undiciFetch } from "./proxy-config.mjs";
+import net from "node:net";
+import tls from "node:tls";
+import { createHash } from "node:crypto";
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36";
 const TOTAL_TIMEOUT_MS = 10_000;
@@ -270,6 +273,23 @@ export async function fetchProduct(p, { noCache = false } = {}) {
   return { ...value, cached: false };
 }
 
+// Raw CONNECT to the proxy (plain TCP; https:// proxies via TLS) -> the proxy's own reply (status line, headers, body head).
+async function rawConnect(target = "api.ipify.org:443") {
+  const opts = { host: PROXY.host, port: Number(PROXY.port), servername: PROXY.host };
+  const auth = PROXY.username ? `Proxy-Authorization: Basic ${Buffer.from(`${PROXY.username}:${PROXY.password}`).toString("base64")}\r\n` : "";
+  return new Promise((resolve) => {
+    let buf = "", done = false;
+    const finish = (txt) => { if (done) return; done = true; try { sock.destroy(); } catch {} resolve(txt); };
+    const sock = PROXY.scheme === "https" ? tls.connect(opts) : net.connect(opts);
+    sock.setTimeout(8000, () => finish(`timeout; got: ${buf.slice(0, 300)}`));
+    sock.on("error", (e) => finish(`socket error: ${e.code || e.message}`));
+    sock.on(PROXY.scheme === "https" ? "secureConnect" : "connect", () =>
+      sock.write(`CONNECT ${target} HTTP/1.1\r\nHost: ${target}\r\n${auth}User-Agent: x402-news-diag\r\n\r\n`));
+    sock.on("data", (d) => { buf += d.toString("latin1"); if (/\r\n\r\n/.test(buf) && (buf.length > 600 || !/^HTTP\/1\.[01] 4/.test(buf))) finish(buf.slice(0, 600)); setTimeout(() => finish(buf.slice(0, 600)), 1500); });
+    sock.on("end", () => finish(buf.slice(0, 600)));
+  });
+}
+
 // ---------- admin diagnostics (token-gated route, not in OpenAPI): proxy egress + raw marketplace answers ----------
 export async function proxyDiagnostics() {
   const targets = [
@@ -285,7 +305,12 @@ export async function proxyDiagnostics() {
     proxy_host_domain: PROXY.host ? PROXY.host.split(".").slice(-2).join(".") : null, // registrable domain only
     username_hints: PROXY.configured ? { length: u.length, has_country_ru: /country[-_=]?ru/i.test(u), has_session: /sess|sid/i.test(u),
       separators: [...new Set(u.replace(/[A-Za-z0-9]/g, ""))].join("") } : null,
-    password_length: PROXY.password ? PROXY.password.length : 0, results: [] };
+    username_sha256_8: PROXY.configured ? createHash("sha256").update(u).digest("hex").slice(0, 8) : null,
+    password_hints: PROXY.password ? { length: PROXY.password.length, has_lower: /[a-z]/.test(PROXY.password), has_upper: /[A-Z]/.test(PROXY.password),
+      has_digit: /\d/.test(PROXY.password), non_alnum_count: PROXY.password.replace(/[A-Za-z0-9]/g, "").length,
+      has_whitespace: /\s/.test(PROXY.password) } : null,
+    raw_connect: PROXY.configured && !PROXY.scheme.startsWith("socks") ? maskSecrets(await rawConnect(), PROXY) : null,
+    results: [] };
   for (const via of PROXY.configured ? ["proxy", "direct"] : ["direct"]) {
     for (const [name, url] of targets) {
       const t = Date.now(), row = { via, name };
