@@ -17,7 +17,7 @@ import { createFacilitatorConfig } from "@coinbase/x402";
 import { declareDiscoveryExtension, bazaarResourceServerExtension } from "@x402/extensions/bazaar";
 import { parseProductUrl, fetchProduct, UpstreamError, proxyConfig, proxyDiagnostics } from "./product.mjs";
 import { describeProxy } from "./proxy-config.mjs";
-import { attachProxyRelay } from "./admin-relay.mjs";
+import { parserConfigured } from "./parser-client.mjs";
 import { parseTerms, matchesTerms, parseNumParam, isoSec, buildSummary, topTopics, recentSummary, alertsNew, trending } from "./news-logic.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -125,7 +125,7 @@ app.set("trust proxy", true); // behind Render / tunnel: use X-Forwarded-Proto/H
 app.get("/health", (_req, res) => {
   const items = readNews();
   res.json({ ok: true, mode: MODE, network: NETWORK, facilitator: FACILITATOR_TYPE, price: PRICE, items: items.length, newest_id: items[0]?.id ?? null, ingest: INGEST_TOKEN ? "enabled" : "disabled",
-    proxy_configured: proxyConfig().configured }); // never the proxy host or credentials
+    proxy_configured: proxyConfig().configured, parser_configured: parserConfigured() }); // never the proxy/parser host or credentials
 });
 
 app.get("/news/sample", (_req, res) => {
@@ -264,7 +264,7 @@ const PRODUCT_OUTPUT_SCHEMA = { type: "object",
     in_stock: { type: ["boolean", "null"] },
     fetched_at: { type: "string", format: "date-time" },
     data_source: { type: "string", description: "Which upstream answered (e.g. card.wb.ru v4, ozon page json-ld)" },
-    via: { type: "string", enum: ["proxy", "direct"], description: "Whether the marketplace was reached through the server's proxy or directly" },
+    via: { type: "string", enum: ["browser", "proxy", "direct"], description: "How the marketplace was reached: headless-browser parser, the server's proxy, or directly" },
     cached: { type: "boolean", description: "true when served from the 10-minute cache" },
   } };
 const EX_T = "2026-10-20T12:20:00Z";
@@ -331,7 +331,7 @@ const PAID_ROUTES = [
     summary: "Wildberries / Ozon product card: title, price (RUB), rating, reviews, stock",
     description: "Live product data for a Wildberries (wildberries.ru, wb.ru) or Ozon (ozon.ru) product URL: title, current price in RUB " +
       "(original_amount = list price before discount when known), rating, reviews_count and availability. Cached 10 min per product. " +
-      "If the marketplace blocks or fails, returns 502 upstream_unavailable and the payment is NOT settled.",
+      "If the marketplace blocks or fails, returns 502 upstream_unavailable and the payment is NOT settled. Can take up to ~40s when the live page has to be rendered.",
     params: { url: PRODUCT_URL_PARAM }, required: ["url"], badRequest: true,
     example: { url: "https://www.wildberries.ru/catalog/211695539/detail.aspx" },
     badRequestText: "url is not a valid http(s) URL, the host is not wildberries.ru/wb.ru/ozon.ru, or no product id could be extracted. Returned before payment.",
@@ -339,7 +339,7 @@ const PAID_ROUTES = [
     outputExample: { source: "wildberries", url: "https://www.wildberries.ru/catalog/211695539/detail.aspx", product_id: "211695539",
       title: "PUSY / Гель для бровей", price: { amount: 623.31, currency: "RUB", original_amount: 1990 }, rating: 4.7, reviews_count: 243068,
       availability: "in_stock", in_stock: true, fetched_at: "2026-10-21T05:24:42Z", data_source: "card.wb.ru v4", via: "proxy", cached: false },
-    extraResponses: { 502: { description: "Marketplace blocked or failed (anti-bot, timeout ~10s, product not found). The x402 payment is not settled.",
+    extraResponses: { 502: { description: "Marketplace blocked or failed (anti-bot, timeout, product not found). The x402 payment is not settled.",
       content: { "application/json": { schema: { type: "object", required: ["error"], properties: {
         error: { type: "string", enum: ["upstream_unavailable"] }, detail: { type: "string" } } } } } } } },
 ];
@@ -651,5 +651,4 @@ app.get("/product/info", async (req, res) => {
   }
 });
 
-const httpServer = app.listen(PORT, HOST, () => console.log(`proxy=${describeProxy(proxyConfig())} x402-news listening on ${HOST}:${PORT} mode=${MODE} network=${NETWORK} facilitator=${FACILITATOR_TYPE} price=${PRICE} payTo=${PAY_TO || "-"} ingest=${INGEST_TOKEN ? "on" : "off"} file=${NEWS_FILE}`));
-if (INGEST_TOKEN) attachProxyRelay(httpServer, { tokenOk, proxyConfig });
+app.listen(PORT, HOST, () => console.log(`proxy=${describeProxy(proxyConfig())} x402-news listening on ${HOST}:${PORT} mode=${MODE} network=${NETWORK} facilitator=${FACILITATOR_TYPE} price=${PRICE} payTo=${PAY_TO || "-"} ingest=${INGEST_TOKEN ? "on" : "off"} parser=${parserConfigured() ? "on" : "off"} file=${NEWS_FILE}`));

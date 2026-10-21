@@ -2,6 +2,7 @@
 // Every failure throws UpstreamError -> the route answers 502, which the x402 v2 middleware never settles.
 // Optional proxy (proxy-config.mjs) is used for these marketplace fetches only.
 import { parseProxyEnv, proxyDispatcher, maskSecrets, undiciFetch } from "./proxy-config.mjs";
+import { parserConfigured, fetchViaParser } from "./parser-client.mjs";
 import net from "node:net";
 import tls from "node:tls";
 import { createHash } from "node:crypto";
@@ -235,6 +236,20 @@ export async function fetchProduct(p, { noCache = false } = {}) {
     if (hit.ok) return { ...hit.value, cached: true };
     throw hit.error;
   }
+  // 1) Headless-browser parser (passes WB/Ozon JS challenges), when PARSER_URL + PARSER_TOKEN are set.
+  let browserAttempt = null, browserHint = null;
+  if (parserConfigured()) {
+    try {
+      const b = await fetchViaParser(p);
+      if (b.value) {
+        if (cache.size >= CACHE_MAX) cache.delete(cache.keys().next().value);
+        cache.set(key, { at: Date.now(), ok: true, value: b.value });
+        return { ...b.value, cached: false };
+      }
+      browserHint = b.hint; browserAttempt = `[browser] no price (${b.hint.availability})`;
+    } catch (e) { browserAttempt = `[browser] ${e.message}`; }
+  }
+  // 2) Existing proxy/direct HTTP chain (unchanged).
   const run = async (via, budgetMs, staticCdn) => {
     const ctx = { deadline: Date.now() + budgetMs, attempts: [], via, proxyDead: false };
     let r = null;
@@ -256,6 +271,7 @@ export async function fetchProduct(p, { noCache = false } = {}) {
     }
     attempts = attempts.map((x) => maskSecrets(x, PROXY));
   }
+  if (browserAttempt) attempts = [browserAttempt, ...(attempts || [])];
   if (!r) {
     const err = new UpstreamError(`${p.source} did not return product data: ${attempts.join("; ") || "no data"}`, attempts);
     cache.set(key, { at: Date.now(), ok: false, error: err });
@@ -268,6 +284,7 @@ export async function fetchProduct(p, { noCache = false } = {}) {
     availability: availability(r.in_stock), in_stock: r.in_stock ?? null,
     fetched_at: new Date().toISOString().replace(/\.\d+Z$/, "Z"), data_source: r.data_source, via: r.via,
   };
+  if (browserHint && browserHint.in_stock === false) { value.availability = "out_of_stock"; value.in_stock = false; } // live stock from the browser
   if (cache.size >= CACHE_MAX) cache.delete(cache.keys().next().value);
   cache.set(key, { at: Date.now(), ok: true, value });
   return { ...value, cached: false };

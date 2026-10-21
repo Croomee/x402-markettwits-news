@@ -1,0 +1,11 @@
+{
+  "name": "x402-parser",
+  "version": "0.1.0",
+  "description": "Headless Chromium (Playwright) product parser for Wildberries / Ozon behind a residential proxy",
+  "type": "module",
+  "main": "server.mjs",
+  "private": true,
+  "scripts": { "start": "node server.mjs", "test": "node --test test/" },
+  "engines": { "node": ">=20" },
+  "dependencies": { "playwright": "^1.56.0", "socks": "^2.8.3" }
+}

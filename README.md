@@ -82,6 +82,39 @@ best-effort; on startup and whenever the file changes it is re-read.
 | `PROXY_FALLBACK_DIRECT` | `true` | retry directly if the proxy path fails |
 | `DEV_MODE` | — | `1` = run without payments (local only) |
 
+## Headless-browser parser (WB / Ozon anti-bot)
+
+Plain HTTP requests to Wildberries/Ozon are blocked even from Russian residential IPs (WB `wbaas` 403/498 token
+challenge, Ozon `?__rr=1` / `abt` challenge). `parser/` is a small Playwright + Chromium service for a VPS that loads
+the real page through the residential proxy, lets the site's own JavaScript pass the challenge, and then reads the
+site's own JSON (WB `__internal/u-card/cards/v4/detail`; Ozon entrypoint-api / ld+json).
+
+- `GET /parse?url=<WB or Ozon product URL>` (or `POST {"url": ...}`), header `Authorization: Bearer $PARSER_TOKEN`.
+  200 → `{ok, source, product_id, url, title, price, old_price, currency, rating, reviews_count, in_stock, availability,
+  brand, seller, data_source, fetched_at, ms, cached}`. 400 invalid url, 401 bad token, 404 product not found,
+  502 `blocked` (anti-bot, e.g. Ozon captcha), 504 timeout, 503 queue full. `GET /health` (no auth).
+- One shared browser/context: cookies and the WB token are reused (and saved to `STATE_DIR`), so after the first
+  cold request (~10–20 s incl. challenge) WB items take well under a second. Concurrency 2, 25 s per request,
+  10 min cache; images/fonts/media are not downloaded (saves residential-proxy traffic).
+- Chromium cannot use a SOCKS5 proxy with a password, so a `socks5://` / `socks5h://` `PROXY_URL` is served through a
+  built-in loopback HTTP-CONNECT bridge (`parser/bridge.mjs`). `http://USER:PASS@host:port` proxies are passed to
+  Chromium directly.
+- Memory: Chromium with a warm WB tab ≈ 500–800 MB. Use ≥ 2 GB RAM, or swap (the setup script adds a 2 GB swapfile
+  when RAM < 2 GB and there is no swap). The unit has `MemoryMax=1600M` and restarts daily.
+
+Install / update on the VPS (root; re-run to update, keeps the token):
+
+```bash
+PROXY_URL='socks5h://USER:PASS@v2.proxyempire.io:5000' \
+  bash <(curl -fsSL https://raw.githubusercontent.com/Croomee/x402-markettwits-news/main/scripts/beget-parser-setup.sh)
+```
+
+It prints `PARSER_URL` and `PARSER_TOKEN`; set both on Render. `/product/info` then calls the parser first
+(timeout `PARSER_TIMEOUT_MS`, default 30 s), returns `via: "browser"`, and on any parser failure falls back to the
+existing proxy/direct chain. 400-before-payment / 402 / settle-only-on-2xx are unchanged; a 502 is still never charged.
+Security: the parser is protected only by the bearer token over plain HTTP (Render has no static egress IPs to
+allow-list). Keep the token secret, rotate it with `--reset-token`, and put it behind HTTPS (e.g. Caddy) when possible.
+
 ## Run locally
 ```bash
 npm ci

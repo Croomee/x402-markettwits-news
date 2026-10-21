@@ -27,3 +27,8 @@ services:
         value: wb,ozon
       - key: PROXY_FALLBACK_DIRECT
         value: "true"
+      # Headless-browser parser on the VPS (parser/, scripts/beget-parser-setup.sh); unset = disabled
+      - key: PARSER_URL
+        sync: false
+      - key: PARSER_TOKEN
+        sync: false
