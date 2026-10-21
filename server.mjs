@@ -19,7 +19,8 @@ import { parseProductUrl, fetchProduct, UpstreamError, proxyConfig, proxyDiagnos
 import { parseCompareInput, parseTargetPrice, compareProducts, monitorResult, buildHistory, COMPARE_MAX } from "./product-analytics.mjs";
 import { describeProxy } from "./proxy-config.mjs";
 import { parserConfigured } from "./parser-client.mjs";
-import { parseTerms, matchesTerms, parseNumParam, isoSec, buildSummary, topTopics, recentSummary, alertsNew, trending } from "./news-logic.mjs";
+import { parseTerms, matchesTerms, parseNumParam, isoSec, buildSummary, topTopics, recentSummary, alertsNew, trending,
+  parseFloatParam, parseCursorId, newsSince, normalizeCountryCode, countryNews, movers, dataSurprises, sentiment, digest } from "./news-logic.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 4021);
@@ -323,6 +324,55 @@ const PRODUCT_URLS_PARAM = { type: "string", minLength: 20, maxLength: 10000,
   description: `2-${COMPARE_MAX} comma-separated product URLs (Wildberries; Ozon is accepted but currently blocked by its anti-bot). ` +
     "Alternatively repeat url= instead." };
 const TARGET_PRICE_PARAM = { type: "string", pattern: "^[0-9]+([.,][0-9]+)?$", description: "Target price in RUB, a positive number (e.g. 1500 or 1499.90)" };
+// ---------- news v3 (since / movers / country / data-surprises / sentiment / digest) ----------
+const BRIEF_SCHEMA = { type: "object", required: ["id", "published_at", "importance", "headline", "source_url"], properties: {
+  ...SHORT_ITEM_SCHEMA.properties, headline: { type: "string", description: "First meaningful line, emoji removed" } } };
+const TOPIC_COUNT_SCHEMA = { type: "array", items: { type: "object", properties: { topic: { type: "string" }, count: { type: "integer" } } } };
+const SINCE_ID_PARAM = { type: "string", pattern: "^[0-9]{1,15}$", description: "Last item id you already have (0 = from the oldest stored item). Items with a larger id are returned, oldest first." };
+const SINCE_LIMIT_PARAM = { type: "integer", minimum: 1, maximum: 100, default: 50, description: "Max items per page (default 50, max 100)" };
+const MIN_PCT_PARAM = { type: "string", pattern: "^[0-9]+([.,][0-9]+)?$", default: "0", description: "Minimum absolute move in percent (default 0, max 100), e.g. 3 or 2.5" };
+const COUNTRY_PARAM = { type: "string", pattern: "^[A-Za-z]{2}$", description: "ISO 3166-1 alpha-2 country code (e.g. US, RU, CN, UA, IR, GB; UK = GB; EU accepted)" };
+const IMPORTANCE_PARAM = { type: "string", enum: ["all", "high", "medium", "low"], default: "all", description: "Importance filter (default all)" };
+const Q_OPT_PARAM = { ...Q_PARAM, description: "Optional keyword filter (same matching as /news/search)" };
+const SINCE_OUTPUT_SCHEMA = { type: "object", required: ["since_id", "count", "has_more", "next_id", "items"], properties: {
+  since_id: { type: "integer" }, count: { type: "integer" }, has_more: { type: "boolean", description: "More items after this page: call again with id=next_id" },
+  next_id: { type: "integer", description: "Pass as id= on the next call (= since_id when nothing new)" },
+  latest_id: { type: ["integer", "null"], description: "Newest id in the store" }, items: { type: "array", items: NEWS_ITEM_SCHEMA, description: "Oldest first" } } };
+const MOVER_SCHEMA = { type: "object", required: ["ticker", "pct", "id", "published_at"], properties: {
+  ticker: { type: "string" }, name: { type: ["string", "null"] }, pct: { type: "number", description: "Reported move in percent (signed)" },
+  country: { type: ["string", "null"], description: "ISO code from the flag before the ticker" }, id: { type: "integer" },
+  published_at: { type: "string", format: "date-time" }, importance: { type: "string" }, source_url: { type: "string", format: "uri" }, headline: { type: "string" } } };
+const MOVERS_OUTPUT_SCHEMA = { type: "object", required: ["hours", "min_pct", "since", "tickers_found", "gainers", "losers"], properties: {
+  hours: { type: "integer" }, min_pct: { type: "number" }, since: { type: "string", format: "date-time" },
+  tickers_found: { type: "integer", description: "Distinct tickers with a '#TICKER = ±X%' mention in the window (newest mention per ticker)" },
+  gainers: { type: "array", items: MOVER_SCHEMA, description: "Top 10, largest first" }, losers: { type: "array", items: MOVER_SCHEMA, description: "Top 10, most negative first" } } };
+const COUNTRY_OUTPUT_SCHEMA = { type: "object", required: ["code", "hours", "count", "high_count", "latest", "top_topics"], properties: {
+  code: { type: "string" }, flag: { type: ["string", "null"] }, hours: { type: "integer" }, importance: { type: "string" }, since: { type: "string", format: "date-time" },
+  count: { type: "integer" }, high_count: { type: "integer" }, by_flag: { type: "integer", description: "Matches by flag emoji (the rest by country keywords)" },
+  share_of_window: { type: "number", description: "Percent of all items in the window" }, top_topics: TOPIC_COUNT_SCHEMA,
+  latest: { type: "array", items: BRIEF_SCHEMA, description: "Up to 10, newest first" } } };
+const SURPRISE_SCHEMA = { type: "object", required: ["kind", "indicator", "actual", "expected", "surprise", "direction", "id"], properties: {
+  kind: { type: "string", enum: ["macro", "earnings"] }, indicator: { type: "string" }, ticker: { type: "string" },
+  actual: { type: "number" }, expected: { type: "number" }, previous: NUMN, unit: { type: ["string", "null"], description: "%, M, B, K, $, '% m/m' ..." },
+  surprise: { type: "number", description: "actual - expected (same unit)" }, surprise_pct: { ...NUMN, description: "surprise / |expected| * 100" },
+  direction: { type: "string", enum: ["above", "below", "inline"] }, id: { type: "integer" }, published_at: { type: "string", format: "date-time" },
+  importance: { type: "string" }, source_url: { type: "string", format: "uri" } } };
+const SURPRISES_OUTPUT_SCHEMA = { type: "object", required: ["hours", "count", "above", "below", "items"], properties: {
+  hours: { type: "integer" }, query: { type: ["string", "null"] }, since: { type: "string", format: "date-time" }, count: { type: "integer" },
+  above: { type: "integer" }, below: { type: "integer" }, items: { type: "array", items: SURPRISE_SCHEMA, description: "Newest first, max 50" } } };
+const SCORED_SCHEMA = { ...BRIEF_SCHEMA, properties: { ...BRIEF_SCHEMA.properties, score: { type: "number" } } };
+const SENTIMENT_OUTPUT_SCHEMA = { type: "object", required: ["query", "hours", "count", "bullish", "bearish", "neutral", "score", "label", "method"], properties: {
+  query: { type: "string" }, hours: { type: "integer" }, since: { type: "string", format: "date-time" }, count: { type: "integer" },
+  bullish: { type: "integer" }, bearish: { type: "integer" }, neutral: { type: "integer" },
+  score: { type: "number", minimum: -1, maximum: 1, description: "(bullish - bearish) / count" },
+  label: { type: "string", enum: ["bullish", "bearish", "neutral", "no_data"] }, method: { type: "string", enum: ["heuristic"] }, note: { type: "string" },
+  examples: { type: "object", properties: { bullish: { type: "array", items: SCORED_SCHEMA }, bearish: { type: "array", items: SCORED_SCHEMA } } } } };
+const DIGEST_SECTION_SCHEMA = { type: "object", properties: { count: { type: "integer" }, high_count: { type: "integer" }, items: { type: "array", items: BRIEF_SCHEMA } } };
+const DIGEST_OUTPUT_SCHEMA = { type: "object", required: ["hours", "count", "sections", "top_topics"], properties: {
+  hours: { type: "integer" }, since: { type: "string", format: "date-time" }, count: { type: "integer" }, high_count: { type: "integer" },
+  sections: { type: "object", properties: Object.fromEntries(["central_banks", "macro", "energy", "equities", "crypto", "geopolitics"].map((k) => [k, DIGEST_SECTION_SCHEMA])) },
+  unclassified_count: { type: "integer" }, top_topics: TOPIC_COUNT_SCHEMA, note: { type: "string" } } };
+const EX_BRIEF = { id: 389795, published_at: "2026-10-21T10:02:00Z", importance: "high", headline: "SPCX = +9%: SpaceX posted a quarterly profit for the first time", source_url: "https://t.me/markettwits/389795" };
 const EX_T = "2026-10-20T12:20:00Z";
 const PAID_ROUTES = [
   { path: "/news/latest", operationId: "getLatestNews", summary: "Latest translated MarketTwits news (newest first)",
@@ -383,6 +433,63 @@ const PAID_ROUTES = [
     outputSchema: TRENDING_OUTPUT_SCHEMA, ok200: "Trending topics",
     outputExample: { hours: 6, items_considered: 12, fallback: false, topics: [{ topic: "Iran", count: 6, prev_count: 2, change: 4,
       latest_id: 389638, latest_source_url: "https://t.me/markettwits/389638" }] } },
+  { path: "/news/since", operationId: "getNewsSince", price: "$0.002",
+    summary: "Incremental feed: items newer than the id you already have (cursor polling)",
+    description: "All stored items with id > id (oldest first, up to limit 1-100, default 50) plus next_id/has_more for the next call. " +
+      "The cheapest way for a bot to poll without duplicates: keep next_id and pass it back.",
+    params: { id: SINCE_ID_PARAM, limit: SINCE_LIMIT_PARAM }, required: ["id"], example: { id: "389850", limit: 50 }, badRequest: true,
+    badRequestText: "id missing (with a payment attached) or not a non-negative integer, or limit not a number. Returned before payment.",
+    outputSchema: SINCE_OUTPUT_SCHEMA, ok200: "Items newer than id (count 0 and next_id = id when nothing new)",
+    outputExample: { since_id: 389850, count: 1, has_more: false, next_id: 389858, latest_id: 389858,
+      items: [{ id: 389858, source_url: "https://t.me/markettwits/389858", published_at: "2026-10-21T15:40:00Z", importance: "high", text_en: "⬆️🇷🇺#KLVZ = +16% PUTIN AND WITKOFF HAD A SUBSTANTIVE CONVERSATION - PESKOV" }] } },
+  { path: "/news/movers", operationId: "getNewsMovers", price: "$0.005",
+    summary: "Top gainers/losers reported in the news ('#TICKER = ±X%')",
+    description: "Parses '#TICKER [Name] = ±X%' price-move mentions (stocks, indices, crypto; RU/US/... from the flag) in news of the last N hours " +
+      "(1-72, default 6), newest mention per ticker, |move| >= min_pct (default 0): top 10 gainers and top 10 losers with the source item.",
+    params: { hours: HOURS_PARAM(6, 72), min_pct: MIN_PCT_PARAM }, required: [], example: { hours: 6, min_pct: "2" }, badRequest: true,
+    badRequestText: "hours or min_pct is not a number. Returned before payment.",
+    outputSchema: MOVERS_OUTPUT_SCHEMA, ok200: "Movers (empty arrays when no moves were reported)",
+    outputExample: { hours: 6, min_pct: 2, since: "2026-10-21T10:00:00Z", tickers_found: 3,
+      gainers: [{ ticker: "KLVZ", name: null, pct: 16, country: "RU", id: 389858, published_at: "2026-10-21T15:40:00Z", importance: "high", source_url: "https://t.me/markettwits/389858", headline: "KLVZ = +16%: PUTIN AND WITKOFF HAD A SUBSTANTIVE CONVERSATION - PESKOV" }],
+      losers: [{ ticker: "NFLX", name: "Netflix", pct: -6, country: "US", id: 389768, published_at: "2026-10-21T06:10:00Z", importance: "medium", source_url: "https://t.me/markettwits/389768", headline: "After-hours moves following earnings: SPCX SpaceX = +8%" }] } },
+  { path: "/news/country", operationId: "getCountryNews", price: "$0.004",
+    summary: "News about one country (flag emoji + country keywords) with counts and top topics",
+    description: "Items of the last N hours (1-168, default 24; importance all|high|medium|low) that carry the country's flag emoji or mention it " +
+      "(e.g. RU: Russia/Kremlin/Bank of Russia/MOEX; US: USA/Fed/White House): count, high_count, share_of_window, top_topics and the 10 latest headlines.",
+    params: { code: COUNTRY_PARAM, hours: HOURS_PARAM(24, 168), importance: IMPORTANCE_PARAM }, required: ["code"], example: { code: "RU", hours: 24 }, badRequest: true,
+    badRequestText: "code is not a 2-letter country code, importance not all|high|medium|low, or hours not a number. Returned before payment.",
+    outputSchema: COUNTRY_OUTPUT_SCHEMA, ok200: "Country news (count 0 when nothing matched)",
+    outputExample: { code: "RU", flag: "🇷🇺", hours: 24, importance: "all", since: "2026-10-20T16:00:00Z", count: 112, high_count: 31, by_flag: 93,
+      share_of_window: 49.1, top_topics: [{ topic: "Russia", count: 40 }], latest: [EX_BRIEF] } },
+  { path: "/news/data-surprises", operationId: "getDataSurprises", price: "$0.006",
+    summary: "Macro data and earnings vs. expectations: actual, expected, previous, surprise",
+    description: "Parses releases like 'US Pending Home Sales (Sep) = -7.3% m/m (exp. -0.5% / prev. +0.3%)' and earnings lines like " +
+      "'3Q REV. $14.58B, EST. $12.87B' from news of the last N hours (1-168, default 24; optional q filter): indicator, actual, expected, previous, unit, " +
+      "surprise (actual - expected), surprise_pct and direction above/below/inline.",
+    params: { hours: HOURS_PARAM(24, 168), q: Q_OPT_PARAM }, required: [], example: { hours: 24, q: "CPI" }, badRequest: true,
+    badRequestText: "hours is not a number, or q is present but empty/longer than 100 chars. Returned before payment.",
+    outputSchema: SURPRISES_OUTPUT_SCHEMA, ok200: "Parsed surprises (count 0 when none)",
+    outputExample: { hours: 24, query: null, since: "2026-10-20T16:00:00Z", count: 1, above: 1, below: 0, items: [{ kind: "macro",
+      indicator: "UK - CONSUMER PRICE INFLATION CPI (Sep) — y/y", actual: 3.5, expected: 3.4, previous: 3.1, unit: "%", surprise: 0.1, surprise_pct: 2.9,
+      direction: "above", id: 389757, published_at: "2026-10-21T06:00:00Z", importance: "high", source_url: "https://t.me/markettwits/389757" }] } },
+  { path: "/news/sentiment", operationId: "getNewsSentiment", price: "$0.005",
+    summary: "Heuristic bullish/bearish tone of news on a keyword (lexicon, not a model)",
+    description: "Scores each item matching q in the last N hours (1-168, default 24) with a keyword/emoji lexicon (rise/beat/upgrade vs. fall/miss/sanctions, " +
+      "⬆️/⬇️) plus explicit '= ±X%' moves, and returns bullish/bearish/neutral counts, score = (bullish - bearish)/count in [-1, 1], a label and examples. " +
+      "method is always 'heuristic'.",
+    params: { q: Q_PARAM, hours: HOURS_PARAM(24, 168) }, required: ["q"], example: { q: "oil", hours: 24 }, badRequest: true,
+    outputSchema: SENTIMENT_OUTPUT_SCHEMA, ok200: "Sentiment (label no_data when nothing matched)",
+    outputExample: { query: "SpaceX", hours: 24, since: "2026-10-20T16:00:00Z", count: 6, bullish: 4, bearish: 1, neutral: 1, score: 0.5, label: "bullish",
+      method: "heuristic", note: "Heuristic keyword/emoji lexicon plus explicit '= ±X%' moves; not a language model.", examples: { bullish: [{ ...EX_BRIEF, score: 1 }], bearish: [] } } },
+  { path: "/news/digest", operationId: "getNewsDigest", price: "$0.01",
+    summary: "Sectioned briefing: central banks, macro, energy, equities, crypto, geopolitics",
+    description: "Groups news of the last N hours (1-48, default 24) into central_banks, macro, energy, equities, crypto and geopolitics by keyword rules " +
+      "(an item may appear in several), each with count, high_count and up to 5 headlines (high first, then newest), plus top_topics of high items.",
+    params: { hours: HOURS_PARAM(24, 48) }, required: [], example: { hours: 24 }, badRequest: true,
+    badRequestText: "hours is not a number. Returned before payment.",
+    outputSchema: DIGEST_OUTPUT_SCHEMA, ok200: "Digest",
+    outputExample: { hours: 24, since: "2026-10-20T16:00:00Z", count: 228, high_count: 70, unclassified_count: 54,
+      sections: { equities: { count: 28, high_count: 7, items: [EX_BRIEF] } }, top_topics: [{ topic: "Ukraine", count: 12 }] } },
   { path: "/product/info", operationId: "getProductInfo", price: "$0.004", tags: ["product"],
     summary: "Wildberries / Ozon product card: title, price (RUB), rating, reviews, stock",
     description: "Live product data for a Wildberries (wildberries.ru, wb.ru) or Ozon (ozon.ru) product URL: title, current price in RUB " +
@@ -500,7 +607,7 @@ app.get("/openapi.json", async (req, res) => {
       description: "Real-time English translations of MarketTwits (top Russian financial Telegram channel). Covers macro, " +
         "central banks, oil/commodities, geopolitics, equities and crypto. Items are tagged high/medium importance and " +
         "updated every few minutes. Ideal for trading bots and news agents.",
-      "x-guidance": `Thirteen paid endpoints via x402 (USDC, scheme exact, network ${NETWORK}` +
+      "x-guidance": `Nineteen paid endpoints via x402 (USDC, scheme exact, network ${NETWORK}` +
         `${paid ? `, payTo ${PAY_TO}` : ""}). Feed endpoints, ${PRICE} each: ` +
         `GET /news/latest?limit=N - full feed (high+medium), use for polling/monitoring all market news. ` +
         `GET /news/important?limit=N - only importance=high, use when you want market-moving headlines only. ` +
@@ -518,6 +625,12 @@ app.get("/openapi.json", async (req, res) => {
         `HIGH-importance matches in the last N hours (1-168), returns {has_new, count, latest}, use as a cheap alert poll; ` +
         `GET /news/topics/trending?hours=6 ($0.004) - top 5 topics in high news of the last N hours (1-72) with prev_count, ` +
         `change (vs. the previous equal window) and latest_id. Non-numeric hours/limit returns 400 before payment. ` +
+        `More news endpoints: GET /news/since?id=LAST_ID&limit=50 ($0.002) - items with id > LAST_ID oldest first + next_id/has_more (cheap polling cursor); ` +
+        `GET /news/movers?hours=6&min_pct=2 ($0.005) - top gainers/losers parsed from '#TICKER = ±X%' mentions; ` +
+        `GET /news/country?code=RU&hours=24&importance=all ($0.004) - news about a country (flag emoji + keywords) with counts, top topics, 10 latest headlines; ` +
+        `GET /news/data-surprises?hours=24&q=CPI ($0.006) - macro releases and earnings vs. expectations (actual, expected, previous, surprise, direction); ` +
+        `GET /news/sentiment?q=WORDS&hours=24 ($0.005) - heuristic lexicon tone: bullish/bearish/neutral counts and score in [-1,1] (method: heuristic); ` +
+        `GET /news/digest?hours=24 ($0.01) - sectioned briefing (central_banks, macro, energy, equities, crypto, geopolitics) with up to 5 headlines each. ` +
         `Marketplace endpoint: GET /product/info?url=PRODUCT_URL ($0.004) - live Wildberries (wildberries.ru/wb.ru /catalog/<id>/) or ` +
         `Ozon (ozon.ru /product/<slug>-<id>/) product data {source, product_id, title, price:{amount, currency:'RUB', original_amount?}, ` +
         `rating, reviews_count, availability, in_stock}; a bad or foreign url returns 400 before payment, and if the marketplace ` +
@@ -611,6 +724,26 @@ const HOURS_RECENT = { def: 12, min: 1, max: 168 }, HOURS_ALERT_NEW = { def: 6, 
 app.get("/news/summary/recent", numCheck("hours", HOURS_RECENT), preCheckQ);
 app.get("/news/alerts/new", numCheck("hours", HOURS_ALERT_NEW), preCheckQ);
 app.get("/news/topics/trending", numCheck("hours", HOURS_TOPICS));
+// News v3 validators (before payment).
+const HOURS_MOVERS = { def: 6, min: 1, max: 72 }, HOURS_DAY = { def: 24, min: 1, max: 168 }, HOURS_DIGEST = { def: 24, min: 1, max: 48 };
+const SINCE_LIMIT = { def: 50, min: 1, max: 100 }, MIN_PCT = { def: 0, min: 0, max: 100 };
+const IMPORTANCES = new Set(["all", "high", "medium", "low"]);
+const floatCheck = (name, opts) => (req, res, next) =>
+  parseFloatParam(req.query[name], opts) === null ? res.status(400).json({ error: `${name} must be a non-negative number` }) : next();
+const optQCheck = (req, res, next) => (req.query.q !== undefined && parseQ(req.query.q) === null ? res.status(400).json({ error: "q must be 1-100 characters" }) : next());
+app.get("/news/since", numCheck("limit", SINCE_LIMIT), (req, res, next) => {
+  if (req.query.id === undefined && !hasPayment(req)) return next();
+  return parseCursorId(req.query.id) === null ? res.status(400).json({ error: "id is required: the last item id you have (non-negative integer, 0 = from the start)" }) : next();
+});
+app.get("/news/movers", numCheck("hours", HOURS_MOVERS), floatCheck("min_pct", MIN_PCT));
+app.get("/news/country", numCheck("hours", HOURS_DAY), (req, res, next) => {
+  if (req.query.importance !== undefined && !IMPORTANCES.has(String(req.query.importance).toLowerCase())) return res.status(400).json({ error: "importance must be all, high, medium or low" });
+  if (req.query.code === undefined && !hasPayment(req)) return next();
+  return normalizeCountryCode(req.query.code) === null ? res.status(400).json({ error: "code is required: a 2-letter country code (e.g. US, RU, CN, UA, GB, EU)" }) : next();
+});
+app.get("/news/data-surprises", numCheck("hours", HOURS_DAY), optQCheck);
+app.get("/news/sentiment", numCheck("hours", HOURS_DAY), preCheckQ);
+app.get("/news/digest", numCheck("hours", HOURS_DIGEST));
 // /product/info: invalid/foreign url -> 400 before payment; missing url without payment -> 402 (x402scan probes).
 app.get("/product/info", (req, res, next) => {
   const present = req.query.url !== undefined;
@@ -646,6 +779,7 @@ app.get("/admin/product-probe", async (req, res) => {
   if (!INGEST_TOKEN) return res.status(404).json({ error: "disabled" });
   if (!tokenOk(req.get("authorization"))) return res.status(401).json({ error: "unauthorized" });
   const t = Date.now(), op = String(req.query.op || "info");
+  if (op.startsWith("news-") && NEWS_OPS[op.slice(5)]) { const [status, body] = NEWS_OPS[op.slice(5)](req.query); return res.json({ ok: status === 200, op, status, ms: Date.now() - t, body }); }
   if (PRODUCT_OPS[op]) { const [status, body] = await PRODUCT_OPS[op](req.query); return res.json({ ok: status === 200, op, status, ms: Date.now() - t, body }); }
   const p = parseProductUrl(req.query.url);
   if (p.error) return res.status(400).json({ error: p.error });
@@ -770,6 +904,49 @@ app.get("/news/topics/trending", (req, res) => {
   res.json(trending(readNews(), hours));
 });
 
+
+// ---------- news v3 handlers (400s here are never settled) ----------
+const NEWS_OPS = {
+  since(q) {
+    const id = parseCursorId(q.id), limit = parseNumParam(q.limit, SINCE_LIMIT);
+    if (id === null) return [400, { error: "id is required: the last item id you have (non-negative integer, 0 = from the start)" }];
+    if (limit === null) return [400, { error: "limit must be a number" }];
+    const r = newsSince(readNews(), id, limit);
+    return [200, { ...r, items: r.items.map(publicItem) }];
+  },
+  movers(q) {
+    const hours = parseNumParam(q.hours, HOURS_MOVERS), minPct = parseFloatParam(q.min_pct, MIN_PCT);
+    if (hours === null) return [400, { error: "hours must be a number" }];
+    if (minPct === null) return [400, { error: "min_pct must be a non-negative number" }];
+    return [200, movers(readNews(), hours, minPct)];
+  },
+  country(q) {
+    const code = normalizeCountryCode(q.code), hours = parseNumParam(q.hours, HOURS_DAY), imp = String(q.importance ?? "all").toLowerCase();
+    if (code === null) return [400, { error: "code is required: a 2-letter country code (e.g. US, RU, CN, UA, GB, EU)" }];
+    if (hours === null) return [400, { error: "hours must be a number" }];
+    if (!IMPORTANCES.has(imp)) return [400, { error: "importance must be all, high, medium or low" }];
+    return [200, countryNews(readNews(), code, hours, imp)];
+  },
+  "data-surprises"(q) {
+    const hours = parseNumParam(q.hours, HOURS_DAY);
+    if (hours === null) return [400, { error: "hours must be a number" }];
+    let query = null;
+    if (q.q !== undefined) { query = parseQ(q.q); if (query === null || !parseTerms(query).length) return [400, { error: "q must be 1-100 characters" }]; }
+    return [200, dataSurprises(readNews(), hours, query)];
+  },
+  sentiment(q) {
+    const query = parseQ(q.q), hours = parseNumParam(q.hours, HOURS_DAY);
+    if (query === null || !parseTerms(query).length) return [400, { error: "q is required (1-100 characters)" }];
+    if (hours === null) return [400, { error: "hours must be a number" }];
+    return [200, sentiment(readNews(), query, hours)];
+  },
+  digest(q) {
+    const hours = parseNumParam(q.hours, HOURS_DIGEST);
+    if (hours === null) return [400, { error: "hours must be a number" }];
+    return [200, digest(readNews(), hours)];
+  },
+};
+for (const op of Object.keys(NEWS_OPS)) app.get(`/news/${op}`, (req, res) => { const [status, body] = NEWS_OPS[op](req.query); res.status(status).json(body); });
 
 app.get("/product/info", async (req, res) => {
   const p = parseProductUrl(req.query.url);
