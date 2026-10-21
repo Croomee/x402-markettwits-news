@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseTerms, matchesTerms, parseNumParam, headlineOf, buildSummary, topTopics } from "../news-logic.mjs";
+import { parseTerms, matchesTerms, parseNumParam, headlineOf, buildSummary, topTopics, trendingTopics, recentSummary, alertsNew, trending } from "../news-logic.mjs";
 
 const it = (id, importance, text_en, published_at = "2026-10-20T12:00:00Z") =>
   ({ id, importance, text_en, published_at, source_url: `https://t.me/markettwits/${id}` });
@@ -38,4 +38,29 @@ test("top topics count once per item", () => {
   const t = topTopics(ITEMS);
   assert.deepEqual(t[0], { topic: "Ukraine", count: 2 });
   assert.ok(t.length <= 5);
+});
+
+const NOW = Date.parse("2026-10-20T15:00:00Z");
+test("recentSummary windows by hours", () => {
+  const r = recentSummary(ITEMS, "Ukraine", 2, NOW);
+  assert.equal(r.count, 2); assert.equal(r.high_count, 1); assert.equal(r.since, "2026-10-20T13:00:00Z");
+  assert.deepEqual(Object.keys(r.items[0]), ["id", "published_at", "importance", "source_url"]);
+  const e = recentSummary(ITEMS, "Ukraine", 1, NOW + 2 * 3600e3);
+  assert.equal(e.count, 0); assert.equal(e.summary, 'No news matched "Ukraine" in the last 1 hours.');
+});
+test("alertsNew only counts HIGH items", () => {
+  const a = alertsNew(ITEMS, "#ukraine", 6, NOW);
+  assert.equal(a.has_new, true); assert.equal(a.count, 1); assert.equal(a.latest.id, 3);
+  const b = alertsNew(ITEMS, "Russia", 6, NOW); // only a medium item mentions Russia
+  assert.equal(b.has_new, false); assert.equal(b.latest, null);
+});
+test("trending: change vs previous window, latest_id, fallback", () => {
+  const t = trendingTopics([ITEMS[0]], [ITEMS[2]]);
+  const u = t.find((x) => x.topic === "Ukraine");
+  assert.deepEqual(u, { topic: "Ukraine", count: 1, prev_count: 0, change: 1, latest_id: 3, latest_source_url: "https://t.me/markettwits/3" });
+  const w = trending(ITEMS, 2, NOW); // high items: id 3 (now window 13-15h), id 1 (prev window 11-13h)
+  assert.equal(w.fallback, false); assert.equal(w.items_considered, 1);
+  const f = trending(ITEMS, 1, Date.parse("2026-10-21T15:00:00Z"));
+  assert.equal(f.fallback, true); assert.equal(f.items_considered, 2); assert.match(f.note, /last 2 high-importance/);
+  assert.deepEqual(topTopics([ITEMS[0]]).map((x) => x.topic), t.map((x) => x.topic)); // same ranking as top-topics
 });

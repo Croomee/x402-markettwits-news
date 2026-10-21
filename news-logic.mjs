@@ -108,8 +108,8 @@ function displayForm(forms) {
 }
 
 // Frequency of hashtags + words (stopwords and <3-char tokens dropped), each counted at most once per item.
-export function topTopics(items, k = 5) {
-  const counts = new Map(), forms = new Map(), lastSeen = new Map(), rank = new Map(); // rank: 2 hashtag, 1 Capitalized, 0 plain
+function countTopics(items) {
+  const counts = new Map(), forms = new Map(), lastSeen = new Map(), rank = new Map(), latest = new Map(); // rank: 2 hashtag, 1 Capitalized, 0 plain
   for (const it of items) {
     const seen = new Set();
     for (let tok of stripEmoji(it.text_en).match(TOKEN_RE) || []) {
@@ -123,10 +123,61 @@ export function topTopics(items, k = 5) {
       if (seen.has(key)) continue;
       seen.add(key);
       counts.set(key, (counts.get(key) || 0) + 1);
+      if (!latest.has(key) || ts(it) > ts(latest.get(key))) latest.set(key, it);
       lastSeen.set(key, Math.max(lastSeen.get(key) || 0, ts(it)));
     }
   }
-  return [...counts.entries()]
-    .sort((a, b) => b[1] - a[1] || rank.get(b[0]) - rank.get(a[0]) || lastSeen.get(b[0]) - lastSeen.get(a[0]) || a[0].localeCompare(b[0]))
-    .slice(0, k).map(([key, count]) => ({ topic: displayForm(forms.get(key)), count }));
+  const ranked = [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || rank.get(b[0]) - rank.get(a[0]) || lastSeen.get(b[0]) - lastSeen.get(a[0]) || a[0].localeCompare(b[0]));
+  return { counts, forms, latest, ranked };
+}
+
+// Frequency of hashtags + words (stopwords and <3-char tokens dropped), each counted at most once per item.
+export function topTopics(items, k = 5) {
+  const { forms, ranked } = countTopics(items);
+  return ranked.slice(0, k).map(([key, count]) => ({ topic: displayForm(forms.get(key)), count }));
+}
+
+// Same ranking as topTopics, plus momentum vs. a previous set of items (equal-length earlier window).
+export function trendingTopics(nowItems, prevItems, k = 5) {
+  const now = countTopics(nowItems), prev = countTopics(prevItems);
+  return now.ranked.slice(0, k).map(([key, count]) => {
+    const prev_count = prev.counts.get(key) || 0, it = now.latest.get(key);
+    return { topic: displayForm(now.forms.get(key)), count, prev_count, change: count - prev_count,
+      latest_id: it.id, latest_source_url: it.source_url };
+  });
+}
+
+// ---------- route-level pure functions (items: all items, newest first; nowMs injectable for tests) ----------
+const H = 3600e3;
+const inWindow = (items, fromMs, toMs = Infinity) => items.filter((it) => ts(it) >= fromMs && ts(it) < toMs);
+
+// /news/summary/recent
+export function recentSummary(items, q, hours, nowMs = Date.now(), max = 50) {
+  const terms = parseTerms(q), sinceMs = nowMs - hours * H;
+  const hits = inWindow(items, sinceMs).filter((it) => matchesTerms(it.text_en, terms)).slice(0, max);
+  return { query: q, hours, since: isoSec(sinceMs), count: hits.length,
+    high_count: hits.filter((i) => i.importance === "high").length,
+    summary: hits.length ? buildSummary(q, hits) : `No news matched "${q}" in the last ${hours} hours.`,
+    items: hits.map(({ id, published_at, importance, source_url }) => ({ id, published_at, importance, source_url })) };
+}
+
+// /news/alerts/new
+export function alertsNew(items, q, hours, nowMs = Date.now()) {
+  const terms = parseTerms(q), sinceMs = nowMs - hours * H;
+  const hits = inWindow(items, sinceMs).filter((it) => it.importance === "high" && matchesTerms(it.text_en, terms));
+  const l = hits[0];
+  return { query: q, hours, since: isoSec(sinceMs), has_new: hits.length > 0, count: hits.length,
+    latest: l ? { id: l.id, published_at: l.published_at, text_en: l.text_en, source_url: l.source_url } : null };
+}
+
+// /news/topics/trending: high items in [now-h, now) vs. [now-2h, now-h). Empty window -> last 20 high items
+// (same fallback as /news/top-topics), compared with the 20 high items before them.
+export function trending(items, hours, nowMs = Date.now()) {
+  const high = items.filter((it) => it.importance === "high");
+  let cur = inWindow(high, nowMs - hours * H), prev = inWindow(high, nowMs - 2 * hours * H, nowMs - hours * H);
+  const fallback = cur.length === 0;
+  if (fallback) { cur = high.slice(0, 20); prev = high.slice(20, 40); }
+  return { hours, items_considered: cur.length, fallback, topics: trendingTopics(cur, prev, 5),
+    ...(fallback ? { note: `No high-importance items in the last ${hours}h; used the last ${cur.length} high-importance items, compared with the ${prev.length} before them.` } : {}) };
 }

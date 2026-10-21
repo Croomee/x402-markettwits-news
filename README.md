@@ -14,10 +14,13 @@ Built with Express and the official x402 v2 packages (`@x402/express`, `@x402/co
 | `GET /news/alerts/check?q=WORDS&hours=24` | **x402: $0.004 USDC** | keyword alert: count of matching items in the last N hours (1-168) + 5 most recent: `{query, hours, count, since, latest_id, latest_published_at, items}` |
 | `GET /news/summary?q=WORDS&limit=10` | **x402: $0.008 USDC** | 3-5 sentence extractive English summary of the latest matching items (limit 1-50): `{query, count, summary, items}` |
 | `GET /news/top-topics?hours=6` | **x402: $0.005 USDC** | top 5 hashtags/keywords in high-importance items of the last N hours (1-72); falls back to the last 20 high items (`fallback: true`) |
+| `GET /news/summary/recent?q=WORDS&hours=12` | **x402: $0.007 USDC** | like `/news/summary` but over matching items from the last N hours (1-168, max 50 items): `{query, hours, since, count, high_count, summary, items}` |
+| `GET /news/alerts/new?q=WORDS&hours=6` | **x402: $0.005 USDC** | only HIGH-importance matches in the last N hours (1-168): `{query, hours, since, has_new, count, latest}` (`latest` null if none) |
+| `GET /news/topics/trending?hours=6` | **x402: $0.004 USDC** | top 5 topics in high items of the last N hours (1-72) with `prev_count`, `change` (= count − count in the previous equal window) and `latest_id`/`latest_source_url`; same fallback as `/news/top-topics` (then compared with the 20 high items before) |
 | `GET /openapi.json` | free, CORS `*` | OpenAPI 3.1 discovery doc for x402scan / agentcash (network, price, payTo from live config) |
 | `POST /ingest` | `Authorization: Bearer <INGEST_TOKEN>` | one item or an array; dedupe by id; 401 bad token; 404 if `INGEST_TOKEN` unset |
 
-The three analytics routes have fixed prices (independent of `PRICE`) and use the same `q` matching and
+The six analytics routes have fixed prices (independent of `PRICE`) and use the same `q` matching and
 pre-payment validation as `/news/search`; a non-numeric `hours`/`limit` also returns 400 before payment.
 The summary is deterministic (no LLM): a lead sentence (`N matching items since <time>; X high-importance.`)
 plus the de-duplicated first sentence/headline of the matching items, high-importance first, then newest.

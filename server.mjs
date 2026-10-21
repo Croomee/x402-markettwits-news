@@ -2,6 +2,7 @@
 // Free:  GET /health, GET /news/sample
 // Paid:  GET /news/latest?limit=N, /news/important, /news/search?q=   (x402 v2, exact scheme, PRICE each)
 //        GET /news/alerts/check ($0.004), /news/summary ($0.008), /news/top-topics ($0.005)
+//        GET /news/summary/recent ($0.007), /news/alerts/new ($0.005), /news/topics/trending ($0.004)
 // Admin: POST /ingest  (Authorization: Bearer <INGEST_TOKEN>)
 import express from "express";
 import fs from "node:fs";
@@ -13,7 +14,7 @@ import { HTTPFacilitatorClient } from "@x402/core/server";
 import { ExactEvmScheme } from "@x402/evm/exact/server";
 import { createFacilitatorConfig } from "@coinbase/x402";
 import { declareDiscoveryExtension, bazaarResourceServerExtension } from "@x402/extensions/bazaar";
-import { parseTerms, matchesTerms, parseNumParam, isoSec, buildSummary, topTopics } from "./news-logic.mjs";
+import { parseTerms, matchesTerms, parseNumParam, isoSec, buildSummary, topTopics, recentSummary, alertsNew, trending } from "./news-logic.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 4021);
@@ -204,6 +205,41 @@ const TOPICS_OUTPUT_SCHEMA = { type: "object", required: ["hours", "items_consid
     fallback: { type: "boolean", description: "true when no high item fell in the window and the last 20 high items were used" },
     note: { type: "string", description: "Explanation when fallback is true" },
   } };
+const RECENT_OUTPUT_SCHEMA = { type: "object", required: ["query", "hours", "since", "count", "high_count", "summary", "items"],
+  properties: {
+    query: { type: "string" }, hours: { type: "integer", description: "Window actually used (1-168)" },
+    since: { type: "string", format: "date-time", description: "Window start (now - hours)" },
+    count: { type: "integer", description: "Matching items in the window that were summarized (max 50)" },
+    high_count: { type: "integer", description: "How many of them are importance=high" },
+    summary: { type: "string", description: "Extractive English summary, 3-5 sentences; 'No news matched \"q\" in the last N hours.' when count is 0" },
+    items: { type: "array", maxItems: 50, items: SHORT_ITEM_SCHEMA },
+  } };
+const ALERTS_NEW_OUTPUT_SCHEMA = { type: "object", required: ["query", "hours", "since", "has_new", "count", "latest"],
+  properties: {
+    query: { type: "string" }, hours: { type: "integer", description: "Window actually used (1-168)" },
+    since: { type: "string", format: "date-time", description: "Window start (now - hours)" },
+    has_new: { type: "boolean", description: "true when at least one HIGH-importance item matched q in the window" },
+    count: { type: "integer", description: "Number of matching HIGH-importance items in the window" },
+    latest: { oneOf: [{ type: "object", required: ["id", "published_at", "text_en", "source_url"], properties: {
+      id: NEWS_ITEM_SCHEMA.properties.id, published_at: NEWS_ITEM_SCHEMA.properties.published_at,
+      text_en: NEWS_ITEM_SCHEMA.properties.text_en, source_url: NEWS_ITEM_SCHEMA.properties.source_url } }, { type: "null" }],
+      description: "Most recent matching HIGH item, or null" },
+  } };
+const TRENDING_OUTPUT_SCHEMA = { type: "object", required: ["hours", "items_considered", "fallback", "topics"],
+  properties: {
+    hours: { type: "integer", description: "Window actually used (1-72)" },
+    items_considered: { type: "integer", description: "High-importance items analysed in the current window" },
+    fallback: { type: "boolean", description: "true when no high item fell in the window: the last 20 high items were used and compared with the 20 before them" },
+    note: { type: "string", description: "Explanation when fallback is true" },
+    topics: { type: "array", maxItems: 5, items: { type: "object", required: ["topic", "count", "prev_count", "change", "latest_id"],
+      properties: {
+        topic: { type: "string" }, count: { type: "integer", description: "Items mentioning the topic in the last N hours" },
+        prev_count: { type: "integer", description: "Items mentioning it in the previous window of equal length" },
+        change: { type: "integer", description: "count - prev_count (positive = rising)" },
+        latest_id: { type: "integer", description: "id of the newest item mentioning the topic" },
+        latest_source_url: { type: "string", format: "uri", description: "Source URL of that item" },
+      } } },
+  } };
 const EX_T = "2026-10-20T12:20:00Z";
 const PAID_ROUTES = [
   { path: "/news/latest", operationId: "getLatestNews", summary: "Latest translated MarketTwits news (newest first)",
@@ -237,6 +273,33 @@ const PAID_ROUTES = [
     badRequestText: "hours is not a number. Returned before payment.",
     outputSchema: TOPICS_OUTPUT_SCHEMA, ok200: "Top topics",
     outputExample: { hours: 6, items_considered: 12, topics: [{ topic: "Ukraine", count: 7 }, { topic: "Iran", count: 4 }], fallback: false } },
+  { path: "/news/summary/recent", operationId: "summarizeRecentNews", price: "$0.007",
+    summary: "Extractive English summary of news on a keyword from the last N hours",
+    description: "3-5 sentence extractive summary of news matching q published in the last N hours (1-168, default 12; up to 50 items), " +
+      "with high_count. Use for 'what happened with X today'.",
+    params: { q: Q_PARAM, hours: HOURS_PARAM(12, 168) }, required: ["q"], example: { q: "Iran", hours: 12 }, badRequest: true,
+    outputSchema: RECENT_OUTPUT_SCHEMA, ok200: "Summary of the window (count 0 and 'No news matched \"q\" in the last N hours.' when nothing matched)",
+    outputExample: { query: "Iran", hours: 12, since: "2026-10-20T00:20:00Z", count: 1, high_count: 1,
+      summary: `1 matching item for "Iran" since 2026-10-20 12:20 UTC; 1 high-importance. TRUMP: I HAVE TO MAKE A FINAL DECISION ON IRAN. ` +
+        "Most recent matching item published 2026-10-20 12:20 UTC.",
+      items: [{ id: 389638, published_at: EX_T, importance: "high", source_url: "https://t.me/markettwits/389638" }] } },
+  { path: "/news/alerts/new", operationId: "checkNewHighAlert", price: "$0.005",
+    summary: "Is there new HIGH-importance news on a keyword in the last N hours?",
+    description: "Checks only importance=high news matching q in the last N hours (1-168, default 6): has_new, count and the latest item. " +
+      "Cheap poll for market-moving alerts on a topic/ticker.",
+    params: { q: Q_PARAM, hours: HOURS_PARAM(6, 168) }, required: ["q"], example: { q: "oil", hours: 6 }, badRequest: true,
+    outputSchema: ALERTS_NEW_OUTPUT_SCHEMA, ok200: "Alert result (has_new false, count 0, latest null when nothing matched)",
+    outputExample: { query: "oil", hours: 6, since: "2026-10-20T06:20:00Z", has_new: true, count: 1,
+      latest: { id: 389638, published_at: EX_T, text_en: EXAMPLE_ITEM.text_en, source_url: EXAMPLE_ITEM.source_url } } },
+  { path: "/news/topics/trending", operationId: "getTrendingTopics", price: "$0.004",
+    summary: "Trending topics in high-importance news with change vs. the previous window",
+    description: "Top 5 topics (hashtags, names, keywords; counted once per item) in high-importance news of the last N hours (1-72, default 6), " +
+      "each with prev_count in the previous equal-length window, change = count - prev_count, and latest_id/latest_source_url",
+    params: { hours: HOURS_PARAM(6, 72) }, required: [], example: { hours: 6 }, badRequest: true,
+    badRequestText: "hours is not a number. Returned before payment.",
+    outputSchema: TRENDING_OUTPUT_SCHEMA, ok200: "Trending topics",
+    outputExample: { hours: 6, items_considered: 12, fallback: false, topics: [{ topic: "Iran", count: 6, prev_count: 2, change: 4,
+      latest_id: 389638, latest_source_url: "https://t.me/markettwits/389638" }] } },
 ];
 const routePrice = (r) => r.price || PRICE;
 const LIST_OUTPUT_SCHEMA = (itemSchema) => ({
@@ -287,7 +350,7 @@ app.get("/openapi.json", async (req, res) => {
       description: "Real-time English translations of MarketTwits (top Russian financial Telegram channel). Covers macro, " +
         "central banks, oil/commodities, geopolitics, equities and crypto. Items are tagged high/medium importance and " +
         "updated every few minutes. Ideal for trading bots and news agents.",
-      "x-guidance": `Six paid endpoints via x402 (USDC, scheme exact, network ${NETWORK}` +
+      "x-guidance": `Nine paid endpoints via x402 (USDC, scheme exact, network ${NETWORK}` +
         `${paid ? `, payTo ${PAY_TO}` : ""}). Feed endpoints, ${PRICE} each: ` +
         `GET /news/latest?limit=N - full feed (high+medium), use for polling/monitoring all market news. ` +
         `GET /news/important?limit=N - only importance=high, use when you want market-moving headlines only. ` +
@@ -299,7 +362,12 @@ app.get("/openapi.json", async (req, res) => {
         `Analytics endpoints (fixed prices): GET /news/alerts/check?q=WORDS&hours=24 ($0.004) - count of matching items in the last N hours ` +
         `(1-168) plus the 5 most recent, use for keyword alerts; GET /news/summary?q=WORDS&limit=10 ($0.008) - 3-5 sentence extractive ` +
         `English summary of the latest matching news (limit 1-50); GET /news/top-topics?hours=6 ($0.005) - top 5 hashtags/keywords in ` +
-        `high-importance news of the last N hours (1-72; falls back to the last 20 high items, fallback=true). Non-numeric hours/limit returns 400 before payment. ` +
+        `high-importance news of the last N hours (1-72; falls back to the last 20 high items, fallback=true). ` +
+        `GET /news/summary/recent?q=WORDS&hours=12 ($0.007) - like /news/summary but only items from the last N hours (1-168, up to 50), ` +
+        `returns {query, hours, since, count, high_count, summary, items}; GET /news/alerts/new?q=WORDS&hours=6 ($0.005) - only ` +
+        `HIGH-importance matches in the last N hours (1-168), returns {has_new, count, latest}, use as a cheap alert poll; ` +
+        `GET /news/topics/trending?hours=6 ($0.004) - top 5 topics in high news of the last N hours (1-72) with prev_count, ` +
+        `change (vs. the previous equal window) and latest_id. Non-numeric hours/limit returns 400 before payment. ` +
         `Free: GET /news/sample (one truncated item), GET /health.`,
       contact: { email: "whale2003@proton.me" },
     },
@@ -378,6 +446,10 @@ const numCheck = (name, opts) => (req, res, next) =>
 app.get("/news/alerts/check", numCheck("hours", HOURS_ALERT), preCheckQ);
 app.get("/news/summary", numCheck("limit", LIMIT_SUMMARY), preCheckQ);
 app.get("/news/top-topics", numCheck("hours", HOURS_TOPICS));
+const HOURS_RECENT = { def: 12, min: 1, max: 168 }, HOURS_ALERT_NEW = { def: 6, min: 1, max: 168 };
+app.get("/news/summary/recent", numCheck("hours", HOURS_RECENT), preCheckQ);
+app.get("/news/alerts/new", numCheck("hours", HOURS_ALERT_NEW), preCheckQ);
+app.get("/news/topics/trending", numCheck("hours", HOURS_TOPICS));
 
 if (MODE === "paid") {
   // CDP: @coinbase/x402 createFacilitatorConfig -> { url, createAuthHeaders } (per-request CDP JWTs)
@@ -473,6 +545,27 @@ app.get("/news/top-topics", (req, res) => {
   if (fallback) items = high.slice(0, 20);
   res.json({ hours, items_considered: items.length, topics: topTopics(items, 5), fallback,
     ...(fallback ? { note: `No high-importance items in the last ${hours}h; used the last ${items.length} high-importance items instead.` } : {}) });
+});
+
+
+app.get("/news/summary/recent", (req, res) => {
+  const m = qTerms(req, res); if (!m) return;
+  const hours = parseNumParam(req.query.hours, HOURS_RECENT);
+  if (hours === null) return res.status(400).json({ error: "hours must be a number" });
+  res.json(recentSummary(readNews(), m.q, hours));
+});
+
+app.get("/news/alerts/new", (req, res) => {
+  const m = qTerms(req, res); if (!m) return;
+  const hours = parseNumParam(req.query.hours, HOURS_ALERT_NEW);
+  if (hours === null) return res.status(400).json({ error: "hours must be a number" });
+  res.json(alertsNew(readNews(), m.q, hours));
+});
+
+app.get("/news/topics/trending", (req, res) => {
+  const hours = parseNumParam(req.query.hours, HOURS_TOPICS);
+  if (hours === null) return res.status(400).json({ error: "hours must be a number" });
+  res.json(trending(readNews(), hours));
 });
 
 app.listen(PORT, HOST, () => console.log(`x402-news listening on ${HOST}:${PORT} mode=${MODE} network=${NETWORK} facilitator=${FACILITATOR_TYPE} price=${PRICE} payTo=${PAY_TO || "-"} ingest=${INGEST_TOKEN ? "on" : "off"} file=${NEWS_FILE}`));
