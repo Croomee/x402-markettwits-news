@@ -48,7 +48,18 @@ function doFetch(url, init, ctx) {
   if (ctx.via !== "proxy") return fetch(url, init);
   return undiciFetch(url, { ...init, dispatcher: proxyDispatcher(PROXY) });
 }
-const errText = (e) => (e.name === "TimeoutError" ? "timeout" : [e.message, e.cause?.code || e.cause?.message].filter(Boolean).join(": "));
+// Walk the cause chain: undici reports proxy tunnel failures as "fetch failed <- Request was cancelled <- Proxy response (407) ..."
+export function errText(e) {
+  if (e?.name === "TimeoutError") return "timeout";
+  const parts = [];
+  for (let x = e, i = 0; x && i < 5; x = x.cause, i++) {
+    const m = [x.code, x.message].filter(Boolean).join(" ");
+    if (m && !parts.includes(m)) parts.push(m);
+  }
+  const t = parts.join(": ");
+  const pr = /Proxy response \((\d{3})\)/.exec(t);
+  return pr ? `proxy CONNECT rejected with HTTP ${pr[1]}${pr[1] === "407" ? " (proxy auth failed)" : ""} [${t}]` : t;
+}
 async function get(url, ctx, { headers = {}, label, redirect = "follow" } = {}) {
   const left = ctx.deadline - Date.now();
   if (left < 300) { ctx.attempts.push(`${label}: skipped (deadline)`); return null; }
@@ -269,7 +280,12 @@ export async function proxyDiagnostics() {
     ["ozon page", "https://www.ozon.ru/product/apple-smartfon-iphone-16-esim-sim-8-128-gb-nano-sim-siniy-1720312800/"],
   ];
   const keep = ["server", "content-type", "status-no-id", "x-wbaas-token", "x-guardium-token", "location", "x-squid-error", "via"];
-  const out = { proxy_configured: PROXY.configured, scheme: PROXY.scheme || null, results: [] };
+  const u = PROXY.username || "";
+  const out = { proxy_configured: PROXY.configured, scheme: PROXY.scheme || null, port: PROXY.port || null,
+    proxy_host_domain: PROXY.host ? PROXY.host.split(".").slice(-2).join(".") : null, // registrable domain only
+    username_hints: PROXY.configured ? { length: u.length, has_country_ru: /country[-_=]?ru/i.test(u), has_session: /sess|sid/i.test(u),
+      separators: [...new Set(u.replace(/[A-Za-z0-9]/g, ""))].join("") } : null,
+    password_length: PROXY.password ? PROXY.password.length : 0, results: [] };
   for (const via of PROXY.configured ? ["proxy", "direct"] : ["direct"]) {
     for (const [name, url] of targets) {
       const t = Date.now(), row = { via, name };

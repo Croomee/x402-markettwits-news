@@ -52,3 +52,11 @@ test("http proxy dispatcher sends Basic auth through a CONNECT tunnel", async ()
   assert.ok(auth?.startsWith("Basic "));
   await proxyDispatcher(cfg).close(); target.close(); proxy.close();
 });
+
+import { errText } from "../product.mjs";
+test("errText surfaces proxy CONNECT status from the undici cause chain", () => {
+  const inner = Object.assign(new Error("Proxy response (407) !== 200 when HTTP Tunneling"), { code: "UND_ERR_ABORTED" });
+  const e = new TypeError("fetch failed", { cause: new Error("Request was cancelled.", { cause: inner }) });
+  assert.match(errText(e), /proxy CONNECT rejected with HTTP 407 \(proxy auth failed\)/);
+  assert.equal(errText(Object.assign(new Error("x"), { name: "TimeoutError" })), "timeout");
+});
