@@ -17,6 +17,7 @@ import { createFacilitatorConfig } from "@coinbase/x402";
 import { declareDiscoveryExtension, bazaarResourceServerExtension } from "@x402/extensions/bazaar";
 import { parseProductUrl, fetchProduct, UpstreamError, proxyConfig, proxyDiagnostics } from "./product.mjs";
 import { describeProxy } from "./proxy-config.mjs";
+import { attachProxyRelay } from "./admin-relay.mjs";
 import { parseTerms, matchesTerms, parseNumParam, isoSec, buildSummary, topTopics, recentSummary, alertsNew, trending } from "./news-logic.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -650,4 +651,5 @@ app.get("/product/info", async (req, res) => {
   }
 });
 
-app.listen(PORT, HOST, () => console.log(`proxy=${describeProxy(proxyConfig())} x402-news listening on ${HOST}:${PORT} mode=${MODE} network=${NETWORK} facilitator=${FACILITATOR_TYPE} price=${PRICE} payTo=${PAY_TO || "-"} ingest=${INGEST_TOKEN ? "on" : "off"} file=${NEWS_FILE}`));
+const httpServer = app.listen(PORT, HOST, () => console.log(`proxy=${describeProxy(proxyConfig())} x402-news listening on ${HOST}:${PORT} mode=${MODE} network=${NETWORK} facilitator=${FACILITATOR_TYPE} price=${PRICE} payTo=${PAY_TO || "-"} ingest=${INGEST_TOKEN ? "on" : "off"} file=${NEWS_FILE}`));
+if (INGEST_TOKEN) attachProxyRelay(httpServer, { tokenOk, proxyConfig });
