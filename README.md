@@ -17,6 +17,8 @@ Built with Express and the official x402 v2 packages (`@x402/express`, `@x402/co
 | `GET /news/summary/recent?q=WORDS&hours=12` | **x402: $0.007 USDC** | like `/news/summary` but over matching items from the last N hours (1-168, max 50 items): `{query, hours, since, count, high_count, summary, items}` |
 | `GET /news/alerts/new?q=WORDS&hours=6` | **x402: $0.005 USDC** | only HIGH-importance matches in the last N hours (1-168): `{query, hours, since, has_new, count, latest}` (`latest` null if none) |
 | `GET /news/topics/trending?hours=6` | **x402: $0.004 USDC** | top 5 topics in high items of the last N hours (1-72) with `prev_count`, `change` (= count − count in the previous equal window) and `latest_id`/`latest_source_url`; same fallback as `/news/top-topics` (then compared with the 20 high items before) |
+| `GET /product/info?url=PRODUCT_URL` | **x402: $0.004 USDC** | Wildberries (`wildberries.ru`, `*.wildberries.ru`, `wb.ru` `/catalog/<id>/`) or Ozon (`*.ozon.ru` `/product/<slug>-<id>/`) product: `{source, url, product_id, title, price:{amount, currency:"RUB", original_amount?}, rating, reviews_count, availability, in_stock, fetched_at}`. Bad/foreign url → 400 before payment; marketplace blocked/failed → **502 `upstream_unavailable`, not settled**. 10-min cache per product, ~10 s timeout |
+| `GET /admin/product-probe?url=` | `Authorization: Bearer <INGEST_TOKEN>` | temporary diagnostic: same fetch logic without cache, returns result or the per-upstream errors; not in OpenAPI |
 | `GET /openapi.json` | free, CORS `*` | OpenAPI 3.1 discovery doc for x402scan / agentcash (network, price, payTo from live config) |
 | `POST /ingest` | `Authorization: Bearer <INGEST_TOKEN>` | one item or an array; dedupe by id; 401 bad token; 404 if `INGEST_TOKEN` unset |
 
@@ -24,6 +26,12 @@ The six analytics routes have fixed prices (independent of `PRICE`) and use the 
 pre-payment validation as `/news/search`; a non-numeric `hours`/`limit` also returns 400 before payment.
 The summary is deterministic (no LLM): a lead sentence (`N matching items since <time>; X high-importance.`)
 plus the de-duplicated first sentence/headline of the matching items, high-importance first, then newest.
+`/product/info` (in `product.mjs`): Wildberries tries the public card API `card.wb.ru/cards/v4|v2|v1/detail` (price in kopecks,
+rating, feedbacks, stock), then the page JSON-LD, then the static CDN (`basket-NN.wbbasket.ru` card.json + feedbacks +
+weekly `price-history.json`; then `price.as_of` is set, availability is `unknown`, prices older than 60 days are refused).
+Ozon tries the page JSON-LD, then `composer-api.bx/page/json/v2`. Both marketplaces run anti-bot protection that often blocks
+datacenter IPs; then the route answers 502. x402 v2 (`exact` on EVM = "authorization" flow) verifies the payment before the
+handler and settles only if the handler's status is < 400, so a 4xx/5xx is never charged.
 Logic lives in `news-logic.mjs`; `npm test` runs its unit tests.
 
 Default network: **Base mainnet `eip155:8453`** (USDC `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`, resolved

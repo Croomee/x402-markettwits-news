@@ -64,3 +64,27 @@ test("trending: change vs previous window, latest_id, fallback", () => {
   assert.equal(f.fallback, true); assert.equal(f.items_considered, 2); assert.match(f.note, /last 2 high-importance/);
   assert.deepEqual(topTopics([ITEMS[0]]).map((x) => x.topic), t.map((x) => x.topic)); // same ranking as top-topics
 });
+
+import { parseProductUrl, parseWbCard, productFromJsonLd, wbBasketHost } from "../product.mjs";
+test("product url validation", () => {
+  assert.deepEqual(parseProductUrl("https://www.wildberries.ru/catalog/211695539/detail.aspx?size=1"),
+    { source: "wildberries", product_id: "211695539", url: "https://www.wildberries.ru/catalog/211695539/detail.aspx" });
+  assert.equal(parseProductUrl("https://wb.ru/catalog/123/").product_id, "123");
+  assert.equal(parseProductUrl("https://global.wildberries.ru/catalog/55/detail.aspx").source, "wildberries");
+  const oz = parseProductUrl("https://www.ozon.ru/product/apple-smartfon-iphone-16-siniy-1720312800/?at=x");
+  assert.equal(oz.source, "ozon"); assert.equal(oz.product_id, "1720312800");
+  assert.equal(parseProductUrl("https://ozon.ru/context/detail/id/1720312800/").product_id, "1720312800");
+  for (const bad of ["https://amazon.com/x", "garbage", "", "ftp://www.ozon.ru/product/x-123/", "https://evilwildberries.ru/catalog/1/",
+    "https://www.ozon.ru/t/abc", "https://www.wildberries.ru/brands/apple"]) assert.ok(parseProductUrl(bad).error, bad);
+  assert.ok(parseProductUrl(undefined).error);
+});
+test("WB card + JSON-LD parsing", () => {
+  const c = parseWbCard({ products: [{ brand: "B", name: "N", reviewRating: 4.8, feedbacks: 10, totalQuantity: 3,
+    sizes: [{ price: { basic: 199000, product: 99000 } }] }] });
+  assert.deepEqual(c, { title: "B / N", amount: 990, original: 1990, rating: 4.8, reviews_count: 10, in_stock: true });
+  assert.equal(parseWbCard({ data: { products: [{ name: "x", salePriceU: 5000, priceU: 9000, sizes: [{ stocks: [] }] }] } }).in_stock, false);
+  const ld = productFromJsonLd('<script type="application/ld+json">{"@type":"Product","name":"P","offers":{"price":"1234","priceCurrency":"RUB",' +
+    '"availability":"https://schema.org/InStock"},"aggregateRating":{"ratingValue":"4.9","reviewCount":"77"}}</script>');
+  assert.deepEqual(ld, { title: "P", price: 1234, currency: "RUB", rating: 4.9, reviews_count: 77, in_stock: true });
+  assert.equal(wbBasketHost(169684889), "12"); assert.equal(wbBasketHost(211695539), "14");
+});

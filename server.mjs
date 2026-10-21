@@ -3,6 +3,7 @@
 // Paid:  GET /news/latest?limit=N, /news/important, /news/search?q=   (x402 v2, exact scheme, PRICE each)
 //        GET /news/alerts/check ($0.004), /news/summary ($0.008), /news/top-topics ($0.005)
 //        GET /news/summary/recent ($0.007), /news/alerts/new ($0.005), /news/topics/trending ($0.004)
+//        GET /product/info?url= ($0.004)  Wildberries / Ozon product card (502 on upstream failure -> never settled)
 // Admin: POST /ingest  (Authorization: Bearer <INGEST_TOKEN>)
 import express from "express";
 import fs from "node:fs";
@@ -14,6 +15,7 @@ import { HTTPFacilitatorClient } from "@x402/core/server";
 import { ExactEvmScheme } from "@x402/evm/exact/server";
 import { createFacilitatorConfig } from "@coinbase/x402";
 import { declareDiscoveryExtension, bazaarResourceServerExtension } from "@x402/extensions/bazaar";
+import { parseProductUrl, fetchProduct, UpstreamError } from "./product.mjs";
 import { parseTerms, matchesTerms, parseNumParam, isoSec, buildSummary, topTopics, recentSummary, alertsNew, trending } from "./news-logic.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -240,6 +242,27 @@ const TRENDING_OUTPUT_SCHEMA = { type: "object", required: ["hours", "items_cons
         latest_source_url: { type: "string", format: "uri", description: "Source URL of that item" },
       } } },
   } };
+const PRODUCT_URL_PARAM = { type: "string", minLength: 10, maxLength: 2000,
+  description: "Product page URL: https://www.wildberries.ru/catalog/<id>/detail.aspx (also wb.ru, *.wildberries.ru) or https://www.ozon.ru/product/<slug>-<id>/ (also *.ozon.ru)" };
+const PRODUCT_OUTPUT_SCHEMA = { type: "object",
+  required: ["source", "url", "product_id", "title", "price", "rating", "reviews_count", "availability", "in_stock", "fetched_at"],
+  properties: {
+    source: { type: "string", enum: ["wildberries", "ozon"] },
+    url: { type: "string", format: "uri", description: "Canonical product URL" },
+    product_id: { type: "string", description: "Marketplace product id (WB nm id / Ozon SKU)" },
+    title: { type: ["string", "null"] },
+    price: { type: "object", required: ["amount", "currency"], properties: {
+      amount: { type: "number", description: "Current price in RUB" }, currency: { type: "string", enum: ["RUB"] },
+      original_amount: { type: "number", description: "List price before discount, when known" },
+      as_of: { type: "string", description: "Only for the Wildberries static-CDN fallback: date of the weekly price point (YYYY-MM-DD)" } } },
+    rating: { type: ["number", "null"], description: "Average rating 0-5" },
+    reviews_count: { type: ["integer", "null"] },
+    availability: { type: "string", enum: ["in_stock", "out_of_stock", "unknown"] },
+    in_stock: { type: ["boolean", "null"] },
+    fetched_at: { type: "string", format: "date-time" },
+    data_source: { type: "string", description: "Which upstream answered (e.g. card.wb.ru v4, ozon page json-ld)" },
+    cached: { type: "boolean", description: "true when served from the 10-minute cache" },
+  } };
 const EX_T = "2026-10-20T12:20:00Z";
 const PAID_ROUTES = [
   { path: "/news/latest", operationId: "getLatestNews", summary: "Latest translated MarketTwits news (newest first)",
@@ -300,6 +323,21 @@ const PAID_ROUTES = [
     outputSchema: TRENDING_OUTPUT_SCHEMA, ok200: "Trending topics",
     outputExample: { hours: 6, items_considered: 12, fallback: false, topics: [{ topic: "Iran", count: 6, prev_count: 2, change: 4,
       latest_id: 389638, latest_source_url: "https://t.me/markettwits/389638" }] } },
+  { path: "/product/info", operationId: "getProductInfo", price: "$0.004", tags: ["product"],
+    summary: "Wildberries / Ozon product card: title, price (RUB), rating, reviews, stock",
+    description: "Live product data for a Wildberries (wildberries.ru, wb.ru) or Ozon (ozon.ru) product URL: title, current price in RUB " +
+      "(original_amount = list price before discount when known), rating, reviews_count and availability. Cached 10 min per product. " +
+      "If the marketplace blocks or fails, returns 502 upstream_unavailable and the payment is NOT settled.",
+    params: { url: PRODUCT_URL_PARAM }, required: ["url"], badRequest: true,
+    example: { url: "https://www.wildberries.ru/catalog/211695539/detail.aspx" },
+    badRequestText: "url is not a valid http(s) URL, the host is not wildberries.ru/wb.ru/ozon.ru, or no product id could be extracted. Returned before payment.",
+    outputSchema: PRODUCT_OUTPUT_SCHEMA, ok200: "Product data",
+    outputExample: { source: "wildberries", url: "https://www.wildberries.ru/catalog/211695539/detail.aspx", product_id: "211695539",
+      title: "PUSY / Гель для бровей", price: { amount: 623.31, currency: "RUB", original_amount: 1990 }, rating: 4.7, reviews_count: 243068,
+      availability: "in_stock", in_stock: true, fetched_at: "2026-10-21T05:24:42Z", data_source: "card.wb.ru v4", cached: false },
+    extraResponses: { 502: { description: "Marketplace blocked or failed (anti-bot, timeout ~10s, product not found). The x402 payment is not settled.",
+      content: { "application/json": { schema: { type: "object", required: ["error"], properties: {
+        error: { type: "string", enum: ["upstream_unavailable"] }, detail: { type: "string" } } } } } } } },
 ];
 const routePrice = (r) => r.price || PRICE;
 const LIST_OUTPUT_SCHEMA = (itemSchema) => ({
@@ -320,7 +358,7 @@ app.get("/openapi.json", async (req, res) => {
   for (const r of PAID_ROUTES) {
     const info = await resolveAsset(routePrice(r));
     paidPaths[r.path] = { get: {
-      operationId: r.operationId, summary: r.summary, description: r.description, tags: ["news"], security: [],
+      operationId: r.operationId, summary: r.summary, description: r.description, tags: r.tags || ["news"], security: [],
       parameters: Object.entries(r.params).map(([name, schema]) => {
         const { description, ...sch } = schema;
         return { name, in: "query", required: r.required.includes(name), description, schema: sch };
@@ -339,6 +377,7 @@ app.get("/openapi.json", async (req, res) => {
           description: "Payment Required. x402 v2 challenge in the PAYMENT-REQUIRED response header (base64 JSON).",
           headers: { "PAYMENT-REQUIRED": { description: "Base64-encoded x402 PaymentRequired object", schema: { type: "string" } } },
         },
+        ...(r.extraResponses || {}),
       },
     } };
   }
@@ -350,7 +389,7 @@ app.get("/openapi.json", async (req, res) => {
       description: "Real-time English translations of MarketTwits (top Russian financial Telegram channel). Covers macro, " +
         "central banks, oil/commodities, geopolitics, equities and crypto. Items are tagged high/medium importance and " +
         "updated every few minutes. Ideal for trading bots and news agents.",
-      "x-guidance": `Nine paid endpoints via x402 (USDC, scheme exact, network ${NETWORK}` +
+      "x-guidance": `Ten paid endpoints via x402 (USDC, scheme exact, network ${NETWORK}` +
         `${paid ? `, payTo ${PAY_TO}` : ""}). Feed endpoints, ${PRICE} each: ` +
         `GET /news/latest?limit=N - full feed (high+medium), use for polling/monitoring all market news. ` +
         `GET /news/important?limit=N - only importance=high, use when you want market-moving headlines only. ` +
@@ -368,6 +407,10 @@ app.get("/openapi.json", async (req, res) => {
         `HIGH-importance matches in the last N hours (1-168), returns {has_new, count, latest}, use as a cheap alert poll; ` +
         `GET /news/topics/trending?hours=6 ($0.004) - top 5 topics in high news of the last N hours (1-72) with prev_count, ` +
         `change (vs. the previous equal window) and latest_id. Non-numeric hours/limit returns 400 before payment. ` +
+        `Marketplace endpoint: GET /product/info?url=PRODUCT_URL ($0.004) - live Wildberries (wildberries.ru/wb.ru /catalog/<id>/) or ` +
+        `Ozon (ozon.ru /product/<slug>-<id>/) product data {source, product_id, title, price:{amount, currency:'RUB', original_amount?}, ` +
+        `rating, reviews_count, availability, in_stock}; a bad or foreign url returns 400 before payment, and if the marketplace ` +
+        `blocks/fails it returns 502 upstream_unavailable without settling the payment. ` +
         `Free: GET /news/sample (one truncated item), GET /health.`,
       contact: { email: "whale2003@proton.me" },
     },
@@ -450,6 +493,24 @@ const HOURS_RECENT = { def: 12, min: 1, max: 168 }, HOURS_ALERT_NEW = { def: 6, 
 app.get("/news/summary/recent", numCheck("hours", HOURS_RECENT), preCheckQ);
 app.get("/news/alerts/new", numCheck("hours", HOURS_ALERT_NEW), preCheckQ);
 app.get("/news/topics/trending", numCheck("hours", HOURS_TOPICS));
+// /product/info: invalid/foreign url -> 400 before payment; missing url without payment -> 402 (x402scan probes).
+app.get("/product/info", (req, res, next) => {
+  const present = req.query.url !== undefined;
+  if (!present && !hasPayment(req)) return next();
+  const p = parseProductUrl(req.query.url);
+  if (p.error) return res.status(400).json({ error: p.error });
+  next();
+});
+// Temporary diagnostic (free, INGEST_TOKEN bearer, not in OpenAPI): same fetch logic, cache bypassed.
+app.get("/admin/product-probe", async (req, res) => {
+  if (!INGEST_TOKEN) return res.status(404).json({ error: "disabled" });
+  if (!tokenOk(req.get("authorization"))) return res.status(401).json({ error: "unauthorized" });
+  const p = parseProductUrl(req.query.url);
+  if (p.error) return res.status(400).json({ error: p.error });
+  const t = Date.now();
+  try { const result = await fetchProduct(p, { noCache: true }); res.json({ ok: true, ms: Date.now() - t, result }); }
+  catch (e) { res.json({ ok: false, ms: Date.now() - t, error: e.detail || e.message, attempts: e.attempts || [] }); }
+});
 
 if (MODE === "paid") {
   // CDP: @coinbase/x402 createFacilitatorConfig -> { url, createAuthHeaders } (per-request CDP JWTs)
@@ -566,6 +627,18 @@ app.get("/news/topics/trending", (req, res) => {
   const hours = parseNumParam(req.query.hours, HOURS_TOPICS);
   if (hours === null) return res.status(400).json({ error: "hours must be a number" });
   res.json(trending(readNews(), hours));
+});
+
+
+app.get("/product/info", async (req, res) => {
+  const p = parseProductUrl(req.query.url);
+  if (p.error) return res.status(400).json({ error: p.error });
+  try {
+    res.json(await fetchProduct(p));
+  } catch (e) {
+    // >= 400 -> the x402 middleware cancels settlement: the buyer is not charged.
+    res.status(502).json({ error: "upstream_unavailable", detail: e instanceof UpstreamError ? e.detail : String(e.message || e) });
+  }
 });
 
 app.listen(PORT, HOST, () => console.log(`x402-news listening on ${HOST}:${PORT} mode=${MODE} network=${NETWORK} facilitator=${FACILITATOR_TYPE} price=${PRICE} payTo=${PAY_TO || "-"} ingest=${INGEST_TOKEN ? "on" : "off"} file=${NEWS_FILE}`));
