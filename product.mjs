@@ -258,3 +258,34 @@ export async function fetchProduct(p, { noCache = false } = {}) {
   cache.set(key, { at: Date.now(), ok: true, value });
   return { ...value, cached: false };
 }
+
+// ---------- admin diagnostics (token-gated route, not in OpenAPI): proxy egress + raw marketplace answers ----------
+export async function proxyDiagnostics() {
+  const targets = [
+    ["egress", "https://ipinfo.io/json"],
+    ["wb card v4", `https://card.wb.ru/cards/v4/detail?appType=1&curr=rub&dest=${WB_DEST}&spp=30&nm=211695539`],
+    ["wb page", "https://www.wildberries.ru/catalog/211695539/detail.aspx"],
+    ["wb basket", "https://basket-14.wbbasket.ru/vol2116/part211695/211695539/info/ru/card.json"],
+    ["ozon page", "https://www.ozon.ru/product/apple-smartfon-iphone-16-esim-sim-8-128-gb-nano-sim-siniy-1720312800/"],
+  ];
+  const keep = ["server", "content-type", "status-no-id", "x-wbaas-token", "x-guardium-token", "location", "x-squid-error", "via"];
+  const out = { proxy_configured: PROXY.configured, scheme: PROXY.scheme || null, results: [] };
+  for (const via of PROXY.configured ? ["proxy", "direct"] : ["direct"]) {
+    for (const [name, url] of targets) {
+      const t = Date.now(), row = { via, name };
+      try {
+        const r = await doFetch(url, { redirect: "manual", signal: AbortSignal.timeout(8000),
+          headers: { "User-Agent": UA, "Accept-Language": "ru-RU,ru;q=0.9", Accept: "*/*" } }, { via });
+        row.status = r.status;
+        row.headers = Object.fromEntries(keep.filter((h) => r.headers.has(h)).map((h) => [h, r.headers.get(h).slice(0, 120)]));
+        const body = await r.text();
+        if (name === "egress") {
+          try { const j = JSON.parse(body); row.egress = { country: j.country, org: j.org, is_proxy_host: j.ip === PROXY.host }; } catch { row.body = body.slice(0, 120); }
+        } else row.body_head = body.replace(/\s+/g, " ").slice(0, 160);
+      } catch (e) { row.error = errText(e); }
+      row.ms = Date.now() - t;
+      out.results.push(JSON.parse(maskSecrets(JSON.stringify(row), PROXY)));
+    }
+  }
+  return out;
+}

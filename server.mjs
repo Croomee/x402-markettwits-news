@@ -15,7 +15,7 @@ import { HTTPFacilitatorClient } from "@x402/core/server";
 import { ExactEvmScheme } from "@x402/evm/exact/server";
 import { createFacilitatorConfig } from "@coinbase/x402";
 import { declareDiscoveryExtension, bazaarResourceServerExtension } from "@x402/extensions/bazaar";
-import { parseProductUrl, fetchProduct, UpstreamError, proxyConfig } from "./product.mjs";
+import { parseProductUrl, fetchProduct, UpstreamError, proxyConfig, proxyDiagnostics } from "./product.mjs";
 import { describeProxy } from "./proxy-config.mjs";
 import { parseTerms, matchesTerms, parseNumParam, isoSec, buildSummary, topTopics, recentSummary, alertsNew, trending } from "./news-logic.mjs";
 
@@ -504,6 +504,11 @@ app.get("/product/info", (req, res, next) => {
   const p = parseProductUrl(req.query.url);
   if (p.error) return res.status(400).json({ error: p.error });
   next();
+});
+app.get("/admin/proxy-check", async (req, res) => {
+  if (!INGEST_TOKEN) return res.status(404).json({ error: "disabled" });
+  if (!tokenOk(req.get("authorization"))) return res.status(401).json({ error: "unauthorized" });
+  res.json(await proxyDiagnostics());
 });
 // Temporary diagnostic (free, INGEST_TOKEN bearer, not in OpenAPI): same fetch logic, cache bypassed.
 app.get("/admin/product-probe", async (req, res) => {
