@@ -15,7 +15,8 @@ import { HTTPFacilitatorClient } from "@x402/core/server";
 import { ExactEvmScheme } from "@x402/evm/exact/server";
 import { createFacilitatorConfig } from "@coinbase/x402";
 import { declareDiscoveryExtension, bazaarResourceServerExtension } from "@x402/extensions/bazaar";
-import { parseProductUrl, fetchProduct, UpstreamError } from "./product.mjs";
+import { parseProductUrl, fetchProduct, UpstreamError, proxyConfig } from "./product.mjs";
+import { describeProxy } from "./proxy-config.mjs";
 import { parseTerms, matchesTerms, parseNumParam, isoSec, buildSummary, topTopics, recentSummary, alertsNew, trending } from "./news-logic.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -122,7 +123,8 @@ app.set("trust proxy", true); // behind Render / tunnel: use X-Forwarded-Proto/H
 
 app.get("/health", (_req, res) => {
   const items = readNews();
-  res.json({ ok: true, mode: MODE, network: NETWORK, facilitator: FACILITATOR_TYPE, price: PRICE, items: items.length, newest_id: items[0]?.id ?? null, ingest: INGEST_TOKEN ? "enabled" : "disabled" });
+  res.json({ ok: true, mode: MODE, network: NETWORK, facilitator: FACILITATOR_TYPE, price: PRICE, items: items.length, newest_id: items[0]?.id ?? null, ingest: INGEST_TOKEN ? "enabled" : "disabled",
+    proxy_configured: proxyConfig().configured }); // never the proxy host or credentials
 });
 
 app.get("/news/sample", (_req, res) => {
@@ -261,6 +263,7 @@ const PRODUCT_OUTPUT_SCHEMA = { type: "object",
     in_stock: { type: ["boolean", "null"] },
     fetched_at: { type: "string", format: "date-time" },
     data_source: { type: "string", description: "Which upstream answered (e.g. card.wb.ru v4, ozon page json-ld)" },
+    via: { type: "string", enum: ["proxy", "direct"], description: "Whether the marketplace was reached through the server's proxy or directly" },
     cached: { type: "boolean", description: "true when served from the 10-minute cache" },
   } };
 const EX_T = "2026-10-20T12:20:00Z";
@@ -334,7 +337,7 @@ const PAID_ROUTES = [
     outputSchema: PRODUCT_OUTPUT_SCHEMA, ok200: "Product data",
     outputExample: { source: "wildberries", url: "https://www.wildberries.ru/catalog/211695539/detail.aspx", product_id: "211695539",
       title: "PUSY / Гель для бровей", price: { amount: 623.31, currency: "RUB", original_amount: 1990 }, rating: 4.7, reviews_count: 243068,
-      availability: "in_stock", in_stock: true, fetched_at: "2026-10-21T05:24:42Z", data_source: "card.wb.ru v4", cached: false },
+      availability: "in_stock", in_stock: true, fetched_at: "2026-10-21T05:24:42Z", data_source: "card.wb.ru v4", via: "proxy", cached: false },
     extraResponses: { 502: { description: "Marketplace blocked or failed (anti-bot, timeout ~10s, product not found). The x402 payment is not settled.",
       content: { "application/json": { schema: { type: "object", required: ["error"], properties: {
         error: { type: "string", enum: ["upstream_unavailable"] }, detail: { type: "string" } } } } } } } },
@@ -433,6 +436,7 @@ app.get("/openapi.json", async (req, res) => {
             type: "object", properties: {
               ok: { type: "boolean" }, mode: { type: "string" }, network: { type: "string" }, facilitator: { type: "string" },
               price: { type: "string" }, items: { type: "integer" }, newest_id: { type: ["integer", "null"] },
+              proxy_configured: { type: "boolean", description: "Whether a marketplace proxy is configured (no details exposed)" },
             },
           } } } } },
         },
@@ -641,4 +645,4 @@ app.get("/product/info", async (req, res) => {
   }
 });
 
-app.listen(PORT, HOST, () => console.log(`x402-news listening on ${HOST}:${PORT} mode=${MODE} network=${NETWORK} facilitator=${FACILITATOR_TYPE} price=${PRICE} payTo=${PAY_TO || "-"} ingest=${INGEST_TOKEN ? "on" : "off"} file=${NEWS_FILE}`));
+app.listen(PORT, HOST, () => console.log(`proxy=${describeProxy(proxyConfig())} x402-news listening on ${HOST}:${PORT} mode=${MODE} network=${NETWORK} facilitator=${FACILITATOR_TYPE} price=${PRICE} payTo=${PAY_TO || "-"} ingest=${INGEST_TOKEN ? "on" : "off"} file=${NEWS_FILE}`));

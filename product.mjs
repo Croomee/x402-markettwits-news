@@ -1,8 +1,15 @@
 // Product lookup for GET /product/info (Wildberries, Ozon). Pure URL parsing + best-effort upstream fetch.
 // Every failure throws UpstreamError -> the route answers 502, which the x402 v2 middleware never settles.
+// Optional proxy (proxy-config.mjs) is used for these marketplace fetches only.
+import { parseProxyEnv, proxyDispatcher, maskSecrets, undiciFetch } from "./proxy-config.mjs";
 
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36";
 const TOTAL_TIMEOUT_MS = 10_000;
+const PROXY_PHASE_MS = 9_000, DIRECT_FALLBACK_MS = 6_000; // only when a proxy is configured
+
+let PROXY = parseProxyEnv(process.env);
+export const proxyConfig = () => PROXY;
+export function setProxyConfig(cfg) { PROXY = cfg; } // tests
 const CACHE_TTL_MS = 10 * 60_000, NEG_TTL_MS = 60_000, CACHE_MAX = 500;
 const WB_DEST = "-1257786"; // Moscow
 const PRICE_HISTORY_MAX_AGE_MS = 60 * 86400e3; // static-CDN fallback: refuse prices older than 60 days
@@ -36,22 +43,33 @@ export function parseProductUrl(raw) {
 }
 
 // ---------- HTTP helper with a shared deadline ----------
-async function get(url, deadline, { headers = {}, attempts, label, redirect = "follow" } = {}) {
-  const left = deadline - Date.now();
-  if (left < 300) { attempts.push(`${label}: skipped (deadline)`); return null; }
+// ctx = { deadline, attempts, via: "direct"|"proxy", proxyDead }
+function doFetch(url, init, ctx) {
+  if (ctx.via !== "proxy") return fetch(url, init);
+  return undiciFetch(url, { ...init, dispatcher: proxyDispatcher(PROXY) });
+}
+const errText = (e) => (e.name === "TimeoutError" ? "timeout" : [e.message, e.cause?.code || e.cause?.message].filter(Boolean).join(": "));
+async function get(url, ctx, { headers = {}, label, redirect = "follow" } = {}) {
+  const left = ctx.deadline - Date.now();
+  if (left < 300) { ctx.attempts.push(`${label}: skipped (deadline)`); return null; }
+  if (ctx.proxyDead) { ctx.attempts.push(`${label}: skipped (proxy unreachable)`); return null; }
   try {
-    const r = await fetch(url, { redirect, signal: AbortSignal.timeout(Math.min(left, 7000)),
-      headers: { "User-Agent": UA, "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8", ...headers } });
+    const r = await doFetch(url, { redirect, signal: AbortSignal.timeout(Math.min(left, 7000)),
+      headers: { "User-Agent": UA, "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8", ...headers } }, ctx);
     if (!r.ok && !(redirect === "manual" && r.status >= 300 && r.status < 400)) {
-      attempts.push(`${label}: HTTP ${r.status}`); await r.body?.cancel().catch(() => {}); return null;
+      if (ctx.via === "proxy" && r.status === 407) ctx.proxyDead = true;
+      ctx.attempts.push(`${label}: HTTP ${r.status}${r.status === 407 ? " (proxy auth failed)" : ""}`); await r.body?.cancel().catch(() => {}); return null;
     }
     return r;
-  } catch (e) { attempts.push(`${label}: ${e.name === "TimeoutError" ? "timeout" : e.message}`); return null; }
+  } catch (e) {
+    if (ctx.via === "proxy" && e.name !== "TimeoutError") ctx.proxyDead = true; // connect/tunnel/auth error: stop using the proxy
+    ctx.attempts.push(`${label}: ${errText(e)}`); return null;
+  }
 }
-async function getJson(url, deadline, opts) {
-  const r = await get(url, deadline, { ...opts, headers: { Accept: "application/json, text/plain, */*", ...opts.headers } });
+async function getJson(url, ctx, opts) {
+  const r = await get(url, ctx, { ...opts, headers: { Accept: "application/json, text/plain, */*", ...opts.headers } });
   if (!r) return null;
-  try { return await r.json(); } catch { opts.attempts.push(`${opts.label}: invalid JSON`); return null; }
+  try { return await r.json(); } catch { ctx.attempts.push(`${opts.label}: invalid JSON`); return null; }
 }
 
 const num = (v) => (v === null || v === undefined || v === "" || !Number.isFinite(Number(v)) ? null : Number(v));
@@ -103,7 +121,8 @@ export function wbBasketHost(nm) {
 }
 const basketBase = (b, nm) => `https://basket-${b}.wbbasket.ru/vol${Math.floor(nm / 1e5)}/part${Math.floor(nm / 1e3)}/${nm}/info`;
 
-async function fetchWildberries(id, deadline, attempts) {
+async function fetchWildberries(id, ctx, { staticCdn = true } = {}) {
+  const { attempts } = ctx;
   const wbHeaders = { Origin: "https://www.wildberries.ru", Referer: `https://www.wildberries.ru/catalog/${id}/detail.aspx` };
   // 1) public card API (full data: price, rating, feedbacks, stock)
   for (const [label, url] of [
@@ -111,7 +130,7 @@ async function fetchWildberries(id, deadline, attempts) {
     ["card.wb.ru v2", `https://card.wb.ru/cards/v2/detail?appType=1&curr=rub&dest=${WB_DEST}&spp=30&nm=${id}`],
     ["card.wb.ru v1", `https://card.wb.ru/cards/v1/detail?appType=1&curr=rub&dest=${WB_DEST}&spp=30&nm=${id}`],
   ]) {
-    const j = await getJson(url, deadline, { attempts, label, headers: wbHeaders });
+    const j = await getJson(url, ctx, { label, headers: wbHeaders });
     if (!j) continue;
     const c = parseWbCard(j);
     if (!c) { attempts.push(`${label}: product not found`); continue; }
@@ -119,20 +138,21 @@ async function fetchWildberries(id, deadline, attempts) {
     return { ...c, data_source: label };
   }
   // 2) product page JSON-LD (usually an anti-bot challenge for non-browser clients)
-  const page = await get(`https://www.wildberries.ru/catalog/${id}/detail.aspx`, deadline, { attempts, label: "wb page", headers: { Accept: "text/html" } });
+  const page = await get(`https://www.wildberries.ru/catalog/${id}/detail.aspx`, ctx, { label: "wb page", headers: { Accept: "text/html" } });
   if (page) {
     const ld = productFromJsonLd(await page.text());
     if (ld?.price) return { title: ld.title, amount: ld.price, original: null, rating: ld.rating, reviews_count: ld.reviews_count, in_stock: ld.in_stock, data_source: "wb page json-ld" };
     attempts.push("wb page: no Product JSON-LD (anti-bot page?)");
   }
+  if (!staticCdn) return null;
   // 3) static CDN: card.json (title) + feedbacks (rating) + price-history.json (last weekly price; stock unknown)
   const nm = Number(id);
   let base = basketBase(wbBasketHost(nm), nm);
-  let card = await getJson(`${base}/ru/card.json`, deadline, { attempts, label: "wb basket card" });
-  if (!card) {
+  let card = await getJson(`${base}/ru/card.json`, ctx, { label: "wb basket card" });
+  if (!card && !ctx.proxyDead) {
     const hosts = Array.from({ length: 45 }, (_, i) => String(i + 1).padStart(2, "0"));
     const probe = await Promise.any(hosts.map(async (b) => {
-      const r = await fetch(`${basketBase(b, nm)}/ru/card.json`, { signal: AbortSignal.timeout(Math.max(500, Math.min(4000, deadline - Date.now()))), headers: { "User-Agent": UA } });
+      const r = await doFetch(`${basketBase(b, nm)}/ru/card.json`, { signal: AbortSignal.timeout(Math.max(500, Math.min(4000, ctx.deadline - Date.now()))), headers: { "User-Agent": UA } }, ctx);
       if (!r.ok) throw new Error(String(r.status));
       return { b, json: await r.json() };
     })).catch(() => null);
@@ -140,8 +160,8 @@ async function fetchWildberries(id, deadline, attempts) {
   }
   if (!card) return null;
   const [hist, fb] = await Promise.all([
-    getJson(`${base}/price-history.json`, deadline, { attempts, label: "wb price-history" }),
-    card.imt_id ? getJson(`https://feedbacks1.wb.ru/feedbacks/v1/${card.imt_id}`, deadline, { attempts, label: "wb feedbacks" }) : null,
+    getJson(`${base}/price-history.json`, ctx, { label: "wb price-history" }),
+    card.imt_id ? getJson(`https://feedbacks1.wb.ru/feedbacks/v1/${card.imt_id}`, ctx, { label: "wb feedbacks" }) : null,
   ]);
   const last = Array.isArray(hist) && hist.length ? hist[hist.length - 1] : null;
   if (!last?.price?.RUB) { attempts.push("wb basket: no price available"); return null; }
@@ -155,10 +175,11 @@ async function fetchWildberries(id, deadline, attempts) {
 function pickCookies(res, jar) {
   for (const c of res.headers.getSetCookie?.() || []) { const kv = c.split(";")[0]; const k = kv.split("=")[0]; jar.set(k, kv); }
 }
-async function ozonGet(url, deadline, attempts, label, accept) {
+async function ozonGet(url, ctx, label, accept) {
+  const { attempts } = ctx;
   const jar = new Map();
   for (let hop = 0; hop < 4; hop++) {
-    const r = await get(url, deadline, { attempts, label, redirect: "manual",
+    const r = await get(url, ctx, { label, redirect: "manual",
       headers: { Accept: accept, Cookie: [...jar.values()].join("; "), "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Site": "none", "Upgrade-Insecure-Requests": "1" } });
     if (!r) return null;
     pickCookies(r, jar);
@@ -174,14 +195,15 @@ export function parseOzonComposer(j) {
   }
   return null;
 }
-async function fetchOzon(p, deadline, attempts) {
-  const page = await ozonGet(`https://www.ozon.ru${p.path}`, deadline, attempts, "ozon page", "text/html,application/xhtml+xml");
+async function fetchOzon(p, ctx) {
+  const { attempts } = ctx;
+  const page = await ozonGet(`https://www.ozon.ru${p.path}`, ctx, "ozon page", "text/html,application/xhtml+xml");
   if (page) {
     const ld = productFromJsonLd(await page.text());
     if (ld?.price) return { ...ld, amount: ld.price, original: null, data_source: "ozon page json-ld" };
     attempts.push("ozon page: no Product JSON-LD (anti-bot page?)");
   }
-  const api = await ozonGet(`https://www.ozon.ru/api/composer-api.bx/page/json/v2?url=${encodeURIComponent(p.path)}`, deadline, attempts, "ozon composer-api", "application/json");
+  const api = await ozonGet(`https://www.ozon.ru/api/composer-api.bx/page/json/v2?url=${encodeURIComponent(p.path)}`, ctx, "ozon composer-api", "application/json");
   if (api) {
     let j = null; try { j = await api.json(); } catch { attempts.push("ozon composer-api: invalid JSON"); }
     const ld = parseOzonComposer(j);
@@ -199,11 +221,28 @@ export async function fetchProduct(p, { noCache = false } = {}) {
     if (hit.ok) return { ...hit.value, cached: true };
     throw hit.error;
   }
-  const deadline = Date.now() + TOTAL_TIMEOUT_MS, attempts = [];
-  let r = null;
-  try { r = p.source === "wildberries" ? await fetchWildberries(p.product_id, deadline, attempts) : await fetchOzon(p, deadline, attempts); }
-  catch (e) { attempts.push(`error: ${e.message}`); }
-  if (!r || r.amount === null || r.amount === undefined) {
+  const run = async (via, budgetMs, staticCdn) => {
+    const ctx = { deadline: Date.now() + budgetMs, attempts: [], via, proxyDead: false };
+    let r = null;
+    try { r = p.source === "wildberries" ? await fetchWildberries(p.product_id, ctx, { staticCdn }) : await fetchOzon(p, ctx); }
+    catch (e) { ctx.attempts.push(`error: ${errText(e)}`); }
+    return { r: r && r.amount !== null && r.amount !== undefined ? { ...r, via } : null, attempts: ctx.attempts };
+  };
+  const useProxy = PROXY.configured && PROXY.scope.has(p.source === "wildberries" ? "wb" : "ozon");
+  let r, attempts;
+  if (!useProxy) {
+    ({ r, attempts } = await run("direct", TOTAL_TIMEOUT_MS, true)); // unchanged behaviour without a proxy
+  } else {
+    // Proxy first: live card API / Ozon page+composer (static CDN only if there is no direct fallback).
+    const a = await run("proxy", PROXY_PHASE_MS, !PROXY.fallbackDirect);
+    r = a.r; attempts = a.attempts.map((x) => `[proxy] ${x}`);
+    if (!r && PROXY.fallbackDirect) {
+      const b = await run("direct", DIRECT_FALLBACK_MS, true);
+      r = b.r; attempts = [...attempts, ...b.attempts.map((x) => `[direct] ${x}`)];
+    }
+    attempts = attempts.map((x) => maskSecrets(x, PROXY));
+  }
+  if (!r) {
     const err = new UpstreamError(`${p.source} did not return product data: ${attempts.join("; ") || "no data"}`, attempts);
     cache.set(key, { at: Date.now(), ok: false, error: err });
     throw err;
@@ -213,7 +252,7 @@ export async function fetchProduct(p, { noCache = false } = {}) {
     price: { amount: r.amount, currency: "RUB", ...(r.original ? { original_amount: r.original } : {}), ...(r.price_as_of ? { as_of: r.price_as_of } : {}) },
     rating: r.rating ?? null, reviews_count: r.reviews_count ?? null,
     availability: availability(r.in_stock), in_stock: r.in_stock ?? null,
-    fetched_at: new Date().toISOString().replace(/\.\d+Z$/, "Z"), data_source: r.data_source,
+    fetched_at: new Date().toISOString().replace(/\.\d+Z$/, "Z"), data_source: r.data_source, via: r.via,
   };
   if (cache.size >= CACHE_MAX) cache.delete(cache.keys().next().value);
   cache.set(key, { at: Date.now(), ok: true, value });

@@ -32,6 +32,18 @@ weekly `price-history.json`; then `price.as_of` is set, availability is `unknown
 Ozon tries the page JSON-LD, then `composer-api.bx/page/json/v2`. Both marketplaces run anti-bot protection that often blocks
 datacenter IPs; then the route answers 502. x402 v2 (`exact` on EVM = "authorization" flow) verifies the payment before the
 handler and settles only if the handler's status is < 400, so a 4xx/5xx is never charged.
+**Marketplace proxy (optional).** Wildberries/Ozon block datacenter IPs, so `/product/info` (and the admin probe) can go
+through an HTTP(S)/SOCKS5 proxy in Russia. Only these marketplace fetches use it; nothing else in the server does.
+`PROXY_URL` (e.g. `http://user:pass@1.2.3.4:3128`, also `https://`, `socks5://`) takes priority over
+`PROXY_HOST`/`PROXY_PORT`/`PROXY_USER`/`PROXY_PASS`. `PROXY_SCOPE` (default `wb,ozon`) selects the marketplaces;
+`PROXY_FALLBACK_DIRECT` (default `true`) retries directly when the proxy path fails (proxy phase ≤ 9 s, direct ≤ 6 s).
+With the proxy the live paths are tried first (card.wb.ru; Ozon page/composer); the WB static CDN stays the last resort.
+Responses carry `via: "proxy"|"direct"`; `/health` shows only `proxy_configured: true|false`; credentials and the proxy
+host are masked in errors and never logged. Without a proxy the behaviour is unchanged (`via: "direct"`).
+Proxy on a Russian VPS (Ubuntu/Debian, as root; squid with basic auth, CONNECT :443 only, systemd, ufw/iptables):
+`curl -fsSL https://raw.githubusercontent.com/Croomee/x402-markettwits-news/main/scripts/beget-proxy-setup.sh | bash`
+(`| bash -s -- 8080 --reset` for another port / new credentials). It prints `PROXY_URL=...`; set that on Render.
+
 Logic lives in `news-logic.mjs`; `npm test` runs its unit tests.
 
 Default network: **Base mainnet `eip155:8453`** (USDC `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`, resolved
@@ -65,6 +77,9 @@ best-effort; on startup and whenever the file changes it is re-read.
 | `PORT` / `HOST` | `4021` / `0.0.0.0` | Render sets `PORT` |
 | `NEWS_FILE` | `data/news.jsonl` | |
 | `PUBLIC_URL` | — | `servers[0].url` in `/openapi.json`; default = request proto/host |
+| `PROXY_URL` | — | optional marketplace proxy for `/product/info` (http/https/socks5); or `PROXY_HOST`/`PROXY_PORT`/`PROXY_USER`/`PROXY_PASS` |
+| `PROXY_SCOPE` | `wb,ozon` | which marketplaces use the proxy |
+| `PROXY_FALLBACK_DIRECT` | `true` | retry directly if the proxy path fails |
 | `DEV_MODE` | — | `1` = run without payments (local only) |
 
 ## Run locally

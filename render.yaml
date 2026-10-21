@@ -21,3 +21,9 @@ services:
         value: "$0.003"
       - key: INGEST_TOKEN
         generateValue: true
+      - key: PROXY_URL
+        sync: false
+      - key: PROXY_SCOPE
+        value: wb,ozon
+      - key: PROXY_FALLBACK_DIRECT
+        value: "true"
