@@ -11,8 +11,17 @@ Built with Express and the official x402 v2 packages (`@x402/express`, `@x402/co
 | `GET /news/latest?limit=N` | **x402: $0.003 USDC** | newest first, default 20, max 50 |
 | `GET /news/important?limit=N` | **x402: $0.003 USDC** | only `importance=high`, newest first |
 | `GET /news/search?q=WORDS&limit=N` | **x402: $0.003 USDC** | case-insensitive, all words must match, `#tag` = `tag`; `q` 1-100 chars. Invalid `q` → 400 before payment (missing `q` without a payment → 402 so discovery probes work); no match → 200 `items: []` |
+| `GET /news/alerts/check?q=WORDS&hours=24` | **x402: $0.004 USDC** | keyword alert: count of matching items in the last N hours (1-168) + 5 most recent: `{query, hours, count, since, latest_id, latest_published_at, items}` |
+| `GET /news/summary?q=WORDS&limit=10` | **x402: $0.008 USDC** | 3-5 sentence extractive English summary of the latest matching items (limit 1-50): `{query, count, summary, items}` |
+| `GET /news/top-topics?hours=6` | **x402: $0.005 USDC** | top 5 hashtags/keywords in high-importance items of the last N hours (1-72); falls back to the last 20 high items (`fallback: true`) |
 | `GET /openapi.json` | free, CORS `*` | OpenAPI 3.1 discovery doc for x402scan / agentcash (network, price, payTo from live config) |
 | `POST /ingest` | `Authorization: Bearer <INGEST_TOKEN>` | one item or an array; dedupe by id; 401 bad token; 404 if `INGEST_TOKEN` unset |
+
+The three analytics routes have fixed prices (independent of `PRICE`) and use the same `q` matching and
+pre-payment validation as `/news/search`; a non-numeric `hours`/`limit` also returns 400 before payment.
+The summary is deterministic (no LLM): a lead sentence (`N matching items since <time>; X high-importance.`)
+plus the de-duplicated first sentence/headline of the matching items, high-importance first, then newest.
+Logic lives in `news-logic.mjs`; `npm test` runs its unit tests.
 
 Default network: **Base mainnet `eip155:8453`** (USDC `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`, resolved
 automatically by `@x402/evm` from the `$` price), via the **Coinbase CDP facilitator**

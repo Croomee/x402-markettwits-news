@@ -1,6 +1,7 @@
 // x402-paid MarketTwits news API
 // Free:  GET /health, GET /news/sample
-// Paid:  GET /news/latest?limit=N   (x402 v2, exact scheme)
+// Paid:  GET /news/latest?limit=N, /news/important, /news/search?q=   (x402 v2, exact scheme, PRICE each)
+//        GET /news/alerts/check ($0.004), /news/summary ($0.008), /news/top-topics ($0.005)
 // Admin: POST /ingest  (Authorization: Bearer <INGEST_TOKEN>)
 import express from "express";
 import fs from "node:fs";
@@ -12,6 +13,7 @@ import { HTTPFacilitatorClient } from "@x402/core/server";
 import { ExactEvmScheme } from "@x402/evm/exact/server";
 import { createFacilitatorConfig } from "@coinbase/x402";
 import { declareDiscoveryExtension, bazaarResourceServerExtension } from "@x402/extensions/bazaar";
+import { parseTerms, matchesTerms, parseNumParam, isoSec, buildSummary, topTopics } from "./news-logic.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 4021);
@@ -132,14 +134,16 @@ app.get("/news/sample", (_req, res) => {
 const PUBLIC_URL = (process.env.PUBLIC_URL || "").trim().replace(/\/+$/, "");
 const DEFAULT_PUBLIC_URL = "https://x402-markettwits-news.onrender.com";
 const PRICE_USD = String(PRICE).replace(/^\$/, "").trim();
-let assetInfo = null; // resolved once from @x402/evm (USDC address for NETWORK)
-async function resolveAsset() {
-  if (assetInfo) return assetInfo;
+const assetInfo = new Map(); // price -> { asset, amount } resolved once from @x402/evm (USDC address for NETWORK)
+async function resolveAsset(price = PRICE) {
+  if (assetInfo.has(price)) return assetInfo.get(price);
+  let info;
   try {
-    const r = await new ExactEvmScheme().parsePrice(PRICE, NETWORK);
-    assetInfo = { asset: r.asset, amount: r.amount, decimals: 6, name: r.extra?.name || "USDC" };
-  } catch { assetInfo = { asset: null, amount: null }; }
-  return assetInfo;
+    const r = await new ExactEvmScheme().parsePrice(price, NETWORK);
+    info = { asset: r.asset, amount: r.amount, decimals: 6, name: r.extra?.name || "USDC" };
+  } catch { info = { asset: null, amount: null }; }
+  assetInfo.set(price, info);
+  return info;
 }
 const NEWS_ITEM_SCHEMA = {
   type: "object",
@@ -168,6 +172,39 @@ const Q_PARAM = { type: "string", minLength: 1, maxLength: 100,
   description: "Keywords (case-insensitive). Several words = all must match. Hashtags match with or without '#', e.g. 'oil', '#Fed rates'." };
 const EXAMPLE_ITEM = { id: 389638, source_url: "https://t.me/markettwits/389638", published_at: "2026-10-20T12:20:00Z",
   importance: "high", text_en: "French government bond yields near 24-year high ahead of protests (Reuters)" };
+const HOURS_PARAM = (def, max) => ({ type: "integer", minimum: 1, maximum: max, default: def,
+  description: `Look-back window in hours (default ${def}, clamped to 1-${max})` });
+const SUMMARY_LIMIT_PARAM = { type: "integer", minimum: 1, maximum: 50, default: 10, description: "Number of latest matching items to summarize (default 10, max 50)" };
+const NOFMT = (sch) => JSON.parse(JSON.stringify(sch, (k, v) => (k === "format" ? undefined : v)));
+const SHORT_ITEM_SCHEMA = { type: "object", required: ["id", "published_at", "importance", "source_url"], properties: {
+  id: NEWS_ITEM_SCHEMA.properties.id, published_at: NEWS_ITEM_SCHEMA.properties.published_at,
+  importance: NEWS_ITEM_SCHEMA.properties.importance, source_url: NEWS_ITEM_SCHEMA.properties.source_url } };
+const ALERT_ITEM_SCHEMA = { ...SHORT_ITEM_SCHEMA, required: [...SHORT_ITEM_SCHEMA.required, "text_en"],
+  properties: { ...SHORT_ITEM_SCHEMA.properties, text_en: NEWS_ITEM_SCHEMA.properties.text_en } };
+const ALERTS_OUTPUT_SCHEMA = { type: "object", required: ["query", "hours", "count", "since", "latest_id", "latest_published_at", "items"],
+  properties: {
+    query: { type: "string" }, hours: { type: "integer", description: "Window actually used (1-168)" },
+    count: { type: "integer", description: "Matching items published within the window" },
+    since: { type: "string", format: "date-time", description: "Window start (now - hours)" },
+    latest_id: { type: ["integer", "null"] }, latest_published_at: { type: ["string", "null"], format: "date-time" },
+    items: { type: "array", maxItems: 5, items: ALERT_ITEM_SCHEMA, description: "Up to 5 most recent matching items in the window" },
+  } };
+const SUMMARY_OUTPUT_SCHEMA = { type: "object", required: ["query", "count", "summary", "items"],
+  properties: {
+    query: { type: "string" }, count: { type: "integer", description: "Number of matching items summarized" },
+    summary: { type: "string", description: "Extractive English summary, 3-5 sentences (lead + de-duplicated headlines)" },
+    items: { type: "array", items: SHORT_ITEM_SCHEMA },
+  } };
+const TOPICS_OUTPUT_SCHEMA = { type: "object", required: ["hours", "items_considered", "topics", "fallback"],
+  properties: {
+    hours: { type: "integer", description: "Window actually used (1-72)" },
+    items_considered: { type: "integer", description: "High-importance items analysed" },
+    topics: { type: "array", maxItems: 5, items: { type: "object", required: ["topic", "count"],
+      properties: { topic: { type: "string" }, count: { type: "integer", description: "Number of items mentioning the topic" } } } },
+    fallback: { type: "boolean", description: "true when no high item fell in the window and the last 20 high items were used" },
+    note: { type: "string", description: "Explanation when fallback is true" },
+  } };
+const EX_T = "2026-10-20T12:20:00Z";
 const PAID_ROUTES = [
   { path: "/news/latest", operationId: "getLatestNews", summary: "Latest translated MarketTwits news (newest first)",
     description: "Latest translated MarketTwits news (newest first), limit 1-50",
@@ -178,7 +215,30 @@ const PAID_ROUTES = [
   { path: "/news/search", operationId: "searchNews", summary: "Keyword search in translated news (newest first)",
     description: "Case-insensitive keyword search in translated MarketTwits news (all words must match), limit 1-50",
     params: { q: Q_PARAM, limit: LIMIT_PARAM }, required: ["q"], example: { q: "oil", limit: 20 }, badRequest: true },
+  { path: "/news/alerts/check", operationId: "checkNewsAlert", price: "$0.004",
+    summary: "Keyword alert check: how many matching items in the last N hours",
+    description: "Count of news matching q (same matching as /news/search) published in the last N hours (1-168, default 24), plus the 5 most recent",
+    params: { q: Q_PARAM, hours: HOURS_PARAM(24, 168) }, required: ["q"], example: { q: "oil", hours: 24 }, badRequest: true,
+    outputSchema: ALERTS_OUTPUT_SCHEMA, ok200: "Alert check result (count 0 and items [] when nothing matched)",
+    outputExample: { query: "oil", hours: 24, count: 1, since: "2026-10-19T12:20:00Z", latest_id: 389638, latest_published_at: EX_T,
+      items: [EXAMPLE_ITEM] } },
+  { path: "/news/summary", operationId: "summarizeNews", price: "$0.008",
+    summary: "Short extractive English summary of the latest news on a keyword",
+    description: "3-5 sentence extractive summary of the latest news matching q (limit 1-50, default 10): lead sentence + de-duplicated headlines, high-importance first",
+    params: { q: Q_PARAM, limit: SUMMARY_LIMIT_PARAM }, required: ["q"], example: { q: "oil", limit: 10 }, badRequest: true,
+    outputSchema: SUMMARY_OUTPUT_SCHEMA, ok200: "Summary (count 0 and a 'No recent news matched' summary when nothing matched)",
+    outputExample: { query: "oil", count: 1, summary: `1 matching item for "oil" since 2026-10-20 12:20 UTC; 1 high-importance. ` +
+      "Oil — API inventories: CRUDE = -4.931M (expected -1.3M / previous -11.12M). Most recent matching item published 2026-10-20 12:20 UTC.",
+      items: [{ id: 389638, published_at: EX_T, importance: "high", source_url: "https://t.me/markettwits/389638" }] } },
+  { path: "/news/top-topics", operationId: "getTopTopics", price: "$0.005",
+    summary: "Top 5 keywords/hashtags in high-importance news of the last N hours",
+    description: "Top 5 topics (hashtags, names, keywords; counted once per item) across high-importance news of the last N hours (1-72, default 6)",
+    params: { hours: HOURS_PARAM(6, 72) }, required: [], example: { hours: 6 }, badRequest: true,
+    badRequestText: "hours is not a number. Returned before payment.",
+    outputSchema: TOPICS_OUTPUT_SCHEMA, ok200: "Top topics",
+    outputExample: { hours: 6, items_considered: 12, topics: [{ topic: "Ukraine", count: 7 }, { topic: "Iran", count: 4 }], fallback: false } },
 ];
+const routePrice = (r) => r.price || PRICE;
 const LIST_OUTPUT_SCHEMA = (itemSchema) => ({
   type: "object", required: ["count", "items"],
   properties: { count: { type: "integer" }, items: { type: "array", items: itemSchema } },
@@ -189,23 +249,28 @@ app.get("/openapi.json", async (req, res) => {
   const host = req.host; // honours X-Forwarded-Host (trust proxy)
   const server = PUBLIC_URL || (host ? `${req.protocol}://${host}` : DEFAULT_PUBLIC_URL);
   const paid = MODE === "paid";
-  const paymentInfo = {
-    price: { mode: "fixed", currency: "USD", amount: PRICE_USD },
-    protocols: [{ x402: { network: NETWORK, scheme: "exact", payTo: PAY_TO, asset: a.asset, amount: a.amount } }],
-  };
+  const paymentInfo = (price, info) => ({
+    price: { mode: "fixed", currency: "USD", amount: String(price).replace(/^\$/, "").trim() },
+    protocols: [{ x402: { network: NETWORK, scheme: "exact", payTo: PAY_TO, asset: info.asset, amount: info.amount } }],
+  });
   const paidPaths = {};
   for (const r of PAID_ROUTES) {
+    const info = await resolveAsset(routePrice(r));
     paidPaths[r.path] = { get: {
       operationId: r.operationId, summary: r.summary, description: r.description, tags: ["news"], security: [],
       parameters: Object.entries(r.params).map(([name, schema]) => {
         const { description, ...sch } = schema;
         return { name, in: "query", required: r.required.includes(name), description, schema: sch };
       }),
-      ...(paid ? { "x-payment-info": paymentInfo } : {}),
+      ...(paid ? { "x-payment-info": paymentInfo(routePrice(r), info) } : {}),
       responses: {
-        200: { description: "News items (newest first); empty items array when nothing matches",
-          content: { "application/json": { schema: LIST_OUTPUT_SCHEMA({ $ref: "#/components/schemas/NewsItem" }) } } },
-        ...(r.badRequest ? { 400: { description: "Missing or invalid q (1-100 chars). Returned before payment when a payment is attached or q is invalid.",
+        200: r.outputSchema
+          ? { description: r.ok200, content: { "application/json": { schema: r.outputSchema } } }
+          : { description: "News items (newest first); empty items array when nothing matches",
+            content: { "application/json": { schema: LIST_OUTPUT_SCHEMA({ $ref: "#/components/schemas/NewsItem" }) } } },
+        ...(r.badRequest ? { 400: { description: r.badRequestText || ("Missing or invalid q (1-100 chars)" +
+          (r.params.hours || r.path === "/news/summary" ? ` or non-numeric ${r.params.hours ? "hours" : "limit"}` : "") +
+          ". Returned before payment when a payment is attached or a parameter is invalid."),
           content: { "application/json": { schema: { type: "object", properties: { error: { type: "string" } } } } } } } : {}),
         402: {
           description: "Payment Required. x402 v2 challenge in the PAYMENT-REQUIRED response header (base64 JSON).",
@@ -222,8 +287,8 @@ app.get("/openapi.json", async (req, res) => {
       description: "Real-time English translations of MarketTwits (top Russian financial Telegram channel). Covers macro, " +
         "central banks, oil/commodities, geopolitics, equities and crypto. Items are tagged high/medium importance and " +
         "updated every few minutes. Ideal for trading bots and news agents.",
-      "x-guidance": `Three paid endpoints, ${PRICE} USDC each per request via x402 (scheme exact, network ${NETWORK}` +
-        `${paid ? `, payTo ${PAY_TO}` : ""}). ` +
+      "x-guidance": `Six paid endpoints via x402 (USDC, scheme exact, network ${NETWORK}` +
+        `${paid ? `, payTo ${PAY_TO}` : ""}). Feed endpoints, ${PRICE} each: ` +
         `GET /news/latest?limit=N - full feed (high+medium), use for polling/monitoring all market news. ` +
         `GET /news/important?limit=N - only importance=high, use when you want market-moving headlines only. ` +
         `GET /news/search?q=WORDS&limit=N - case-insensitive keyword search (all words must match; '#oil' and 'oil' both work), ` +
@@ -231,6 +296,10 @@ app.get("/openapi.json", async (req, res) => {
         `An unpaid call returns HTTP 402 with a PAYMENT-REQUIRED header (base64 x402 v2 challenge); pay with an x402 client ` +
         `(e.g. @x402/fetch) and retry. Invalid q (empty or >100 chars) returns 400 before any payment; no match returns 200 with items []. ` +
         `Response: {count, items:[{id, source_url, published_at, importance, text_en, posted_to_x, buffer_post_id}]}. ` +
+        `Analytics endpoints (fixed prices): GET /news/alerts/check?q=WORDS&hours=24 ($0.004) - count of matching items in the last N hours ` +
+        `(1-168) plus the 5 most recent, use for keyword alerts; GET /news/summary?q=WORDS&limit=10 ($0.008) - 3-5 sentence extractive ` +
+        `English summary of the latest matching news (limit 1-50); GET /news/top-topics?hours=6 ($0.005) - top 5 hashtags/keywords in ` +
+        `high-importance news of the last N hours (1-72; falls back to the last 20 high items, fallback=true). Non-numeric hours/limit returns 400 before payment. ` +
         `Free: GET /news/sample (one truncated item), GET /health.`,
       contact: { email: "whale2003@proton.me" },
     },
@@ -293,14 +362,22 @@ function parseQ(raw) {
   const q = raw.trim();
   return q.length >= 1 && q.length <= 100 && /[^#\s]/.test(q) ? q : null;
 }
-app.get("/news/search", (req, res, next) => {
-  const hasPayment = Boolean(req.get("payment-signature") || req.get("x-payment"));
+const hasPayment = (req) => Boolean(req.get("payment-signature") || req.get("x-payment"));
+function preCheckQ(req, res, next) {
   const present = req.query.q !== undefined;
-  if (parseQ(req.query.q) === null && (present || hasPayment)) {
+  if (parseQ(req.query.q) === null && (present || hasPayment(req))) {
     return res.status(400).json({ error: "q is required (1-100 characters)" });
   }
   next();
-});
+}
+app.get("/news/search", preCheckQ);
+// New analytics routes: same q pattern; non-numeric hours/limit -> 400 before payment.
+const HOURS_ALERT = { def: 24, min: 1, max: 168 }, HOURS_TOPICS = { def: 6, min: 1, max: 72 }, LIMIT_SUMMARY = { def: 10, min: 1, max: 50 };
+const numCheck = (name, opts) => (req, res, next) =>
+  parseNumParam(req.query[name], opts) === null ? res.status(400).json({ error: `${name} must be a number` }) : next();
+app.get("/news/alerts/check", numCheck("hours", HOURS_ALERT), preCheckQ);
+app.get("/news/summary", numCheck("limit", LIMIT_SUMMARY), preCheckQ);
+app.get("/news/top-topics", numCheck("hours", HOURS_TOPICS));
 
 if (MODE === "paid") {
   // CDP: @coinbase/x402 createFacilitatorConfig -> { url, createAuthHeaders } (per-request CDP JWTs)
@@ -311,7 +388,7 @@ if (MODE === "paid") {
   const routes = {};
   for (const r of PAID_ROUTES) {
     routes[`GET ${r.path}`] = {
-      accepts: [{ scheme: "exact", price: PRICE, network: NETWORK, payTo: PAY_TO, maxTimeoutSeconds: 60 }],
+      accepts: [{ scheme: "exact", price: routePrice(r), network: NETWORK, payTo: PAY_TO, maxTimeoutSeconds: 60 }],
       description: r.description,
       mimeType: "application/json",
       // Bazaar discovery metadata in the 402 challenge (input/output schema for x402scan / facilitator catalogs)
@@ -319,7 +396,9 @@ if (MODE === "paid") {
         ...declareDiscoveryExtension({
           input: r.example,
           inputSchema: { properties: r.params, required: r.required },
-          output: { example: { count: 1, items: [EXAMPLE_ITEM] }, schema: LIST_OUTPUT_SCHEMA(NEWS_ITEM_SCHEMA_NOFMT) },
+          output: r.outputSchema
+            ? { example: r.outputExample, schema: NOFMT(r.outputSchema) }
+            : { example: { count: 1, items: [EXAMPLE_ITEM] }, schema: LIST_OUTPUT_SCHEMA(NEWS_ITEM_SCHEMA_NOFMT) },
         }),
       },
     };
@@ -344,15 +423,56 @@ app.get("/news/important", (req, res) =>
 app.get("/news/search", (req, res) => {
   const q = parseQ(req.query.q);
   if (q === null) return res.status(400).json({ error: "q is required (1-100 characters)" }); // no settlement on 4xx
-  const terms = q.toLowerCase().split(/\s+/).map((t) => t.replace(/^#+/, "")).filter(Boolean);
+  const terms = parseTerms(q);
   if (!terms.length) return res.status(400).json({ error: "q must contain at least one word" });
   const limit = parseLimit(req.query.limit);
   const out = [];
   for (const it of readNews()) {
-    const text = it.text_en.toLowerCase();
-    if (terms.every((t) => text.includes(t))) { out.push(it); if (out.length >= limit) break; }
+    if (matchesTerms(it.text_en, terms)) { out.push(it); if (out.length >= limit) break; }
   }
   sendItems(res, out);
+});
+
+// Shared q handling for the analytics routes (400s here are never settled by the x402 middleware).
+function qTerms(req, res) {
+  const q = parseQ(req.query.q);
+  if (q === null) { res.status(400).json({ error: "q is required (1-100 characters)" }); return null; }
+  const terms = parseTerms(q);
+  if (!terms.length) { res.status(400).json({ error: "q must contain at least one word" }); return null; }
+  return { q, terms };
+}
+const shortItem = ({ id, published_at, importance, source_url }) => ({ id, published_at, importance, source_url });
+
+app.get("/news/alerts/check", (req, res) => {
+  const m = qTerms(req, res); if (!m) return;
+  const hours = parseNumParam(req.query.hours, HOURS_ALERT);
+  if (hours === null) return res.status(400).json({ error: "hours must be a number" });
+  const sinceMs = Date.now() - hours * 3600e3;
+  const hits = readNews().filter((it) => ts(it) >= sinceMs && matchesTerms(it.text_en, m.terms)); // newest first
+  res.json({ query: m.q, hours, count: hits.length, since: isoSec(sinceMs),
+    latest_id: hits[0]?.id ?? null, latest_published_at: hits[0]?.published_at ?? null,
+    items: hits.slice(0, 5).map(({ id, published_at, importance, text_en, source_url }) => ({ id, published_at, importance, text_en, source_url })) });
+});
+
+app.get("/news/summary", (req, res) => {
+  const m = qTerms(req, res); if (!m) return;
+  const limit = parseNumParam(req.query.limit, LIMIT_SUMMARY);
+  if (limit === null) return res.status(400).json({ error: "limit must be a number" });
+  const hits = [];
+  for (const it of readNews()) { if (matchesTerms(it.text_en, m.terms)) { hits.push(it); if (hits.length >= limit) break; } }
+  res.json({ query: m.q, count: hits.length, summary: buildSummary(m.q, hits), items: hits.map(shortItem) });
+});
+
+app.get("/news/top-topics", (req, res) => {
+  const hours = parseNumParam(req.query.hours, HOURS_TOPICS);
+  if (hours === null) return res.status(400).json({ error: "hours must be a number" });
+  const sinceMs = Date.now() - hours * 3600e3;
+  const high = readNews().filter((it) => it.importance === "high");
+  let items = high.filter((it) => ts(it) >= sinceMs);
+  const fallback = items.length === 0;
+  if (fallback) items = high.slice(0, 20);
+  res.json({ hours, items_considered: items.length, topics: topTopics(items, 5), fallback,
+    ...(fallback ? { note: `No high-importance items in the last ${hours}h; used the last ${items.length} high-importance items instead.` } : {}) });
 });
 
 app.listen(PORT, HOST, () => console.log(`x402-news listening on ${HOST}:${PORT} mode=${MODE} network=${NETWORK} facilitator=${FACILITATOR_TYPE} price=${PRICE} payTo=${PAY_TO || "-"} ingest=${INGEST_TOKEN ? "on" : "off"} file=${NEWS_FILE}`));

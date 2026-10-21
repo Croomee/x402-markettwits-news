@@ -5,7 +5,8 @@
   "main": "server.mjs",
   "scripts": {
     "start": "node server.mjs",
-    "dev": "DEV_MODE=1 node server.mjs"
+    "dev": "DEV_MODE=1 node server.mjs",
+    "test": "node --test test/"
   },
   "license": "UNLICENSED",
   "type": "module",
