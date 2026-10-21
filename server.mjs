@@ -15,7 +15,8 @@ import { HTTPFacilitatorClient } from "@x402/core/server";
 import { ExactEvmScheme } from "@x402/evm/exact/server";
 import { createFacilitatorConfig } from "@coinbase/x402";
 import { declareDiscoveryExtension, bazaarResourceServerExtension } from "@x402/extensions/bazaar";
-import { parseProductUrl, fetchProduct, UpstreamError, proxyConfig, proxyDiagnostics } from "./product.mjs";
+import { parseProductUrl, fetchProduct, UpstreamError, proxyConfig, proxyDiagnostics, fetchWbPriceHistory, getObservations } from "./product.mjs";
+import { parseCompareInput, parseTargetPrice, compareProducts, monitorResult, buildHistory, COMPARE_MAX } from "./product-analytics.mjs";
 import { describeProxy } from "./proxy-config.mjs";
 import { parserConfigured } from "./parser-client.mjs";
 import { parseTerms, matchesTerms, parseNumParam, isoSec, buildSummary, topTopics, recentSummary, alertsNew, trending } from "./news-logic.mjs";
@@ -267,6 +268,61 @@ const PRODUCT_OUTPUT_SCHEMA = { type: "object",
     via: { type: "string", enum: ["browser", "proxy", "direct"], description: "How the marketplace was reached: headless-browser parser, the server's proxy, or directly" },
     cached: { type: "boolean", description: "true when served from the 10-minute cache" },
   } };
+const UPSTREAM_502 = (what) => ({ 502: { description: `${what} The x402 payment is not settled.`,
+  content: { "application/json": { schema: { type: "object", required: ["error"], properties: {
+    error: { type: "string", enum: ["upstream_unavailable"] }, detail: { type: "string" } } } } } } });
+const NUMN = { type: ["number", "null"] };
+const COMPARE_ITEM_SCHEMA = { type: "object", required: ["product_id", "url", "title", "price", "in_stock"], properties: {
+  product_id: { type: "string" }, source: { type: "string", enum: ["wildberries", "ozon"] }, url: { type: "string", format: "uri" },
+  title: { type: ["string", "null"] }, price: { ...NUMN, description: "Current price, RUB (null when this item failed)" },
+  original_price: { ...NUMN, description: "List price before discount, when known" }, in_stock: { type: ["boolean", "null"] },
+  rating: NUMN, reviews_count: { type: ["integer", "null"] }, data_source: { type: ["string", "null"] },
+  price_as_of: { type: "string", description: "Only when the price came from the weekly CDN fallback" },
+  error: { type: "string", enum: ["upstream_unavailable", "out_of_stock_no_price"], description: "Present only on failed items" },
+  detail: { type: "string" } } };
+const PICK_SCHEMA = { type: ["object", "null"], properties: { product_id: { type: "string" }, url: { type: "string" }, title: { type: ["string", "null"] }, price: { type: "number" } } };
+const COMPARE_OUTPUT_SCHEMA = { type: "object",
+  required: ["count", "succeeded", "items", "cheapest", "most_expensive", "price_diff", "in_stock_count", "all_in_stock", "fetched_at"],
+  properties: {
+    count: { type: "integer" }, succeeded: { type: "integer", description: "Items that returned a price (>= 2, else 502)" },
+    items: { type: "array", items: COMPARE_ITEM_SCHEMA, description: "In request order; failed items carry error/detail" },
+    cheapest: PICK_SCHEMA, most_expensive: PICK_SCHEMA,
+    price_diff: { type: ["object", "null"], properties: { abs: { type: "number", description: "most_expensive - cheapest, RUB" },
+      percent: { ...NUMN, description: "abs / cheapest * 100" } } },
+    in_stock_count: { type: "integer" }, all_in_stock: { type: "boolean", description: "true only if every requested item is in stock" },
+    currency: { type: "string", enum: ["RUB"] }, fetched_at: { type: "string", format: "date-time" } } };
+const MONITOR_OUTPUT_SCHEMA = { type: "object",
+  required: ["below_target", "current_price", "target_price", "diff_abs", "diff_percent", "in_stock", "checked_at", "product_id", "url"],
+  properties: {
+    url: { type: "string", format: "uri" }, product_id: { type: "string" }, title: { type: ["string", "null"] },
+    below_target: { type: "boolean", description: "current_price <= target_price and the product is not out of stock (false when there is no current price)" },
+    current_price: { ...NUMN, description: "RUB; null only when the product is out of stock with no price" },
+    original_price: NUMN, target_price: { type: "number" }, currency: { type: "string", enum: ["RUB"] },
+    diff_abs: { ...NUMN, description: "current_price - target_price (negative = below target)" },
+    diff_percent: { ...NUMN, description: "diff_abs / target_price * 100" },
+    in_stock: { type: ["boolean", "null"] }, note: { type: "string" },
+    product: { type: "object", description: "Full /product/info-style product object" },
+    checked_at: { type: "string", format: "date-time" } } };
+const HISTORY_OUTPUT_SCHEMA = { type: "object", required: ["product_id", "url", "current", "points", "stats", "change_30d", "history_limited", "checked_at"],
+  properties: {
+    url: { type: "string", format: "uri" }, product_id: { type: "string" }, source: { type: "string" }, title: { type: ["string", "null"] },
+    currency: { type: "string", enum: ["RUB"] },
+    current: { type: "object", properties: { price: { type: "number" }, original_price: NUMN,
+      source: { type: "string", enum: ["live", "weekly_cdn", "observed"] }, date: { type: "string" } } },
+    points: { type: "array", description: "Oldest first", items: { type: "object", required: ["date", "price", "source"], properties: {
+      date: { type: "string", description: "YYYY-MM-DD for weekly_cdn points, ISO date-time for observed/live" },
+      price: { type: "number" }, source: { type: "string", enum: ["weekly_cdn", "observed", "live"] } } } },
+    stats: { type: "object", properties: { min: { type: "number" }, max: { type: "number" }, avg: { type: "number" }, count: { type: "integer" },
+      from: { type: "string" }, to: { type: "string" } } },
+    change_30d: { type: ["object", "null"], description: "current vs. the latest point at least 30 days old (null if none)", properties: {
+      vs_date: { type: "string" }, vs_price: { type: "number" }, abs: { type: "number" }, percent: { type: "number" } } },
+    history_limited: { type: "boolean", description: "true when only the current price is available" }, note: { type: "string" },
+    sources: { type: "object", properties: { weekly_cdn: { type: "integer" }, observed: { type: "integer" }, live: { type: "integer" } } },
+    checked_at: { type: "string", format: "date-time" } } };
+const PRODUCT_URLS_PARAM = { type: "string", minLength: 20, maxLength: 10000,
+  description: `2-${COMPARE_MAX} comma-separated product URLs (Wildberries; Ozon is accepted but currently blocked by its anti-bot). ` +
+    "Alternatively repeat url= instead." };
+const TARGET_PRICE_PARAM = { type: "string", pattern: "^[0-9]+([.,][0-9]+)?$", description: "Target price in RUB, a positive number (e.g. 1500 or 1499.90)" };
 const EX_T = "2026-10-20T12:20:00Z";
 const PAID_ROUTES = [
   { path: "/news/latest", operationId: "getLatestNews", summary: "Latest translated MarketTwits news (newest first)",
@@ -342,6 +398,57 @@ const PAID_ROUTES = [
     extraResponses: { 502: { description: "Marketplace blocked or failed (anti-bot, timeout, product not found). The x402 payment is not settled.",
       content: { "application/json": { schema: { type: "object", required: ["error"], properties: {
         error: { type: "string", enum: ["upstream_unavailable"] }, detail: { type: "string" } } } } } } } },
+  { path: "/product/compare", operationId: "compareProducts", price: "$0.006", tags: ["product"],
+    summary: "Compare 2-5 Wildberries products: prices, cheapest, price spread, stock",
+    description: `Fetches 2-${COMPARE_MAX} product URLs (urls=comma-separated, or repeated url=) with the same live chain as /product/info and returns ` +
+      "per-item title/price/original_price/in_stock/rating/reviews_count, the cheapest and most expensive item, price_diff (abs RUB and percent of the cheapest), " +
+      "in_stock_count and all_in_stock. Items that fail carry error/detail; returns 502 (payment not settled) only if fewer than 2 items returned a price.",
+    params: { urls: PRODUCT_URLS_PARAM }, required: ["urls"], badRequest: true,
+    example: { urls: "https://www.wildberries.ru/catalog/1256886607/detail.aspx,https://www.wildberries.ru/catalog/197349073/detail.aspx" },
+    badRequestText: `Fewer than 2 or more than ${COMPARE_MAX} URLs, a duplicate product, or any URL that is invalid / not wildberries.ru, wb.ru or ozon.ru. Returned before payment.`,
+    outputSchema: COMPARE_OUTPUT_SCHEMA, ok200: "Comparison (at least 2 items with a price; failed items have error)",
+    outputExample: { count: 2, succeeded: 2, items: [
+      { product_id: "1256886607", source: "wildberries", url: "https://www.wildberries.ru/catalog/1256886607/detail.aspx", title: "Наушники беспроводные A.Pods Pro 2",
+        price: 680, original_price: 1999, in_stock: true, rating: 5, reviews_count: 15084, data_source: "browser: wb card api (browser)" },
+      { product_id: "197349073", source: "wildberries", url: "https://www.wildberries.ru/catalog/197349073/detail.aspx", title: "Наушники беспроводные Pods Pro 2",
+        price: 618, original_price: 1112, in_stock: true, rating: 5, reviews_count: 134625, data_source: "browser: wb card api (browser)" }],
+      cheapest: { product_id: "197349073", url: "https://www.wildberries.ru/catalog/197349073/detail.aspx", title: "Наушники беспроводные Pods Pro 2", price: 618 },
+      most_expensive: { product_id: "1256886607", url: "https://www.wildberries.ru/catalog/1256886607/detail.aspx", title: "Наушники беспроводные A.Pods Pro 2", price: 680 },
+      price_diff: { abs: 62, percent: 10.03 }, in_stock_count: 2, all_in_stock: true, currency: "RUB", fetched_at: "2026-10-21T16:30:00Z" },
+    extraResponses: UPSTREAM_502("Fewer than 2 products returned a price (anti-bot, timeout, not found).") },
+  { path: "/product/monitor", operationId: "monitorProductPrice", price: "$0.005", tags: ["product"],
+    summary: "Price-target check for one product: is the current price at or below target_price?",
+    description: "Fetches one Wildberries/Ozon product (same live chain as /product/info) and compares it with target_price (RUB): below_target " +
+      "(current <= target and not out of stock), current_price, diff_abs/diff_percent, in_stock, the full product object and checked_at. Use it as a paid poll for price alerts. " +
+      "If the product is out of stock with no price it returns 200 with below_target false, current_price null, in_stock false and a note; " +
+      "if no product data can be fetched at all it returns 502 and the payment is not settled.",
+    params: { url: PRODUCT_URL_PARAM, target_price: TARGET_PRICE_PARAM }, required: ["url", "target_price"], badRequest: true,
+    example: { url: "https://www.wildberries.ru/catalog/839226871/detail.aspx", target_price: "1500" },
+    badRequestText: "url invalid/unsupported, or target_price missing, non-numeric, zero or negative. Returned before payment.",
+    outputSchema: MONITOR_OUTPUT_SCHEMA, ok200: "Target check result",
+    outputExample: { target_price: 1500, currency: "RUB", checked_at: "2026-10-21T16:30:00Z", url: "https://www.wildberries.ru/catalog/839226871/detail.aspx",
+      product_id: "839226871", title: "Наушники беспроводные TWS Pro 2", below_target: false, current_price: 1592, original_price: 2525,
+      diff_abs: 92, diff_percent: 6.13, in_stock: true,
+      product: { source: "wildberries", product_id: "839226871", title: "Наушники беспроводные TWS Pro 2", price: { amount: 1592, currency: "RUB", original_amount: 2525 } } },
+    extraResponses: UPSTREAM_502("No product data could be fetched (anti-bot, timeout, not found).") },
+  { path: "/product/history", operationId: "getProductPriceHistory", price: "$0.004", tags: ["product"],
+    summary: "Wildberries price history: weekly CDN points + observed + live price, min/max/avg, 30-day change",
+    description: "Price history for a Wildberries product: weekly points from WB's public price-history CDN (weekly_cdn), prices this service observed " +
+      "on earlier lookups (observed; in-memory, reset on restart), and the current live price (live). Returns points (oldest first), current, " +
+      "stats min/max/avg, change_30d (vs. the latest point at least 30 days old) and history_limited:true with a note when only the current price exists. " +
+      "Ozon has no public history (only live, currently blocked). 502 (not settled) only when no price at all is available.",
+    params: { url: PRODUCT_URL_PARAM }, required: ["url"], badRequest: true,
+    example: { url: "https://www.wildberries.ru/catalog/839226871/detail.aspx" },
+    badRequestText: "url is not a valid http(s) URL, the host is not wildberries.ru/wb.ru/ozon.ru, or no product id could be extracted. Returned before payment.",
+    outputSchema: HISTORY_OUTPUT_SCHEMA, ok200: "Price history",
+    outputExample: { url: "https://www.wildberries.ru/catalog/839226871/detail.aspx", product_id: "839226871", source: "wildberries",
+      title: "Наушники беспроводные TWS Pro 2", currency: "RUB", current: { price: 1592, original_price: 2525, source: "live", date: "2026-10-21T16:30:00Z" },
+      points: [{ date: "2026-09-13", price: 1602.06, source: "weekly_cdn" }, { date: "2026-09-20", price: 1471.2, source: "weekly_cdn" },
+        { date: "2026-10-21T16:30:00Z", price: 1592, source: "live" }],
+      stats: { min: 1471.2, max: 1602.06, avg: 1555.09, count: 3, from: "2026-09-13", to: "2026-10-21T16:30:00Z" },
+      change_30d: { vs_date: "2026-09-20", vs_price: 1471.2, abs: 120.8, percent: 8.21 }, history_limited: false,
+      sources: { weekly_cdn: 2, observed: 0, live: 1 }, checked_at: "2026-10-21T16:30:00Z" },
+    extraResponses: UPSTREAM_502("No price at all (no weekly history and the live fetch failed).") },
 ];
 const routePrice = (r) => r.price || PRICE;
 const LIST_OUTPUT_SCHEMA = (itemSchema) => ({
@@ -393,7 +500,7 @@ app.get("/openapi.json", async (req, res) => {
       description: "Real-time English translations of MarketTwits (top Russian financial Telegram channel). Covers macro, " +
         "central banks, oil/commodities, geopolitics, equities and crypto. Items are tagged high/medium importance and " +
         "updated every few minutes. Ideal for trading bots and news agents.",
-      "x-guidance": `Ten paid endpoints via x402 (USDC, scheme exact, network ${NETWORK}` +
+      "x-guidance": `Thirteen paid endpoints via x402 (USDC, scheme exact, network ${NETWORK}` +
         `${paid ? `, payTo ${PAY_TO}` : ""}). Feed endpoints, ${PRICE} each: ` +
         `GET /news/latest?limit=N - full feed (high+medium), use for polling/monitoring all market news. ` +
         `GET /news/important?limit=N - only importance=high, use when you want market-moving headlines only. ` +
@@ -415,6 +522,12 @@ app.get("/openapi.json", async (req, res) => {
         `Ozon (ozon.ru /product/<slug>-<id>/) product data {source, product_id, title, price:{amount, currency:'RUB', original_amount?}, ` +
         `rating, reviews_count, availability, in_stock}; a bad or foreign url returns 400 before payment, and if the marketplace ` +
         `blocks/fails it returns 502 upstream_unavailable without settling the payment. ` +
+        `GET /product/compare?urls=URL1,URL2[,...] ($0.006) - 2-${COMPARE_MAX} products (or repeat url=): items with price/original_price/in_stock/rating, ` +
+        `cheapest, most_expensive, price_diff {abs, percent}, in_stock_count, all_in_stock; per-item errors allowed, 502 if fewer than 2 priced. ` +
+        `GET /product/monitor?url=URL&target_price=RUB ($0.005) - below_target (current <= target and not out of stock), current_price, diff_abs/diff_percent, in_stock; ` +
+        `out-of-stock without a price -> 200 below_target:false current_price:null. ` +
+        `GET /product/history?url=URL ($0.004) - Wildberries weekly CDN price points + observed + live price, min/max/avg, change_30d, ` +
+        `history_limited when only the current price exists. Wildberries works via a headless-browser parser; Ozon is currently blocked (502, not charged). ` +
         `Free: GET /news/sample (one truncated item), GET /health.`,
       contact: { email: "whale2003@proton.me" },
     },
@@ -506,6 +619,23 @@ app.get("/product/info", (req, res, next) => {
   if (p.error) return res.status(400).json({ error: p.error });
   next();
 });
+// /product/compare|monitor|history: invalid input -> 400 before payment; nothing given and no payment -> 402 (x402scan probes).
+const anyPresent = (req, keys) => keys.some((k) => req.query[k] !== undefined);
+app.get("/product/compare", (req, res, next) => {
+  if (!anyPresent(req, ["urls", "url"]) && !hasPayment(req)) return next();
+  const c = parseCompareInput(req.query, parseProductUrl);
+  return c.error ? res.status(400).json({ error: c.error }) : next();
+});
+app.get("/product/monitor", (req, res, next) => {
+  if (!anyPresent(req, ["url", "target_price"]) && !hasPayment(req)) return next();
+  const e = monitorInputError(req.query);
+  return e ? res.status(400).json({ error: e }) : next();
+});
+app.get("/product/history", (req, res, next) => {
+  if (!anyPresent(req, ["url"]) && !hasPayment(req)) return next();
+  const p = parseProductUrl(req.query.url);
+  return p.error ? res.status(400).json({ error: p.error }) : next();
+});
 app.get("/admin/proxy-check", async (req, res) => {
   if (!INGEST_TOKEN) return res.status(404).json({ error: "disabled" });
   if (!tokenOk(req.get("authorization"))) return res.status(401).json({ error: "unauthorized" });
@@ -515,9 +645,10 @@ app.get("/admin/proxy-check", async (req, res) => {
 app.get("/admin/product-probe", async (req, res) => {
   if (!INGEST_TOKEN) return res.status(404).json({ error: "disabled" });
   if (!tokenOk(req.get("authorization"))) return res.status(401).json({ error: "unauthorized" });
+  const t = Date.now(), op = String(req.query.op || "info");
+  if (PRODUCT_OPS[op]) { const [status, body] = await PRODUCT_OPS[op](req.query); return res.json({ ok: status === 200, op, status, ms: Date.now() - t, body }); }
   const p = parseProductUrl(req.query.url);
   if (p.error) return res.status(400).json({ error: p.error });
-  const t = Date.now();
   try { const result = await fetchProduct(p, { noCache: true }); res.json({ ok: true, ms: Date.now() - t, result }); }
   catch (e) { res.json({ ok: false, ms: Date.now() - t, error: e.detail || e.message, attempts: e.attempts || [] }); }
 });
@@ -650,5 +781,52 @@ app.get("/product/info", async (req, res) => {
     res.status(502).json({ error: "upstream_unavailable", detail: e instanceof UpstreamError ? e.detail : String(e.message || e) });
   }
 });
+
+// ---------- /product/compare, /product/monitor, /product/history (also reachable via /admin/product-probe?op=...) ----------
+function monitorInputError(q) {
+  const p = parseProductUrl(q.url);
+  if (p.error) return p.error;
+  if (parseTargetPrice(q.target_price) === null) return "target_price is required: a positive number in RUB (e.g. 1500)";
+  return null;
+}
+async function fetchOne(p) {
+  try { return { p, value: await fetchProduct(p) }; }
+  catch (e) { return { p, error: e instanceof UpstreamError ? e.detail : String(e.message || e), hint: e.hint || null }; }
+}
+async function mapLimit(list, n, fn) { // the VPS parser renders one page at a time; 2 in flight keeps its queue short
+  const out = new Array(list.length); let i = 0;
+  await Promise.all(Array.from({ length: Math.min(n, list.length) }, async () => { while (i < list.length) { const k = i++; out[k] = await fn(list[k]); } }));
+  return out;
+}
+const PRODUCT_OPS = {
+  async compare(q) {
+    const c = parseCompareInput(q, parseProductUrl);
+    if (c.error) return [400, { error: c.error }];
+    const out = compareProducts(await mapLimit(c.products, 2, fetchOne));
+    if (out.succeeded < 2) return [502, { error: "upstream_unavailable", detail: `only ${out.succeeded} of ${out.count} products returned a price (need 2)`, items: out.items }];
+    return [200, out];
+  },
+  async monitor(q) {
+    const e = monitorInputError(q);
+    if (e) return [400, { error: e }];
+    const p = parseProductUrl(q.url), r = await fetchOne(p);
+    const out = monitorResult({ value: r.value, hint: r.hint, target: parseTargetPrice(q.target_price) });
+    return out ? [200, out] : [502, { error: "upstream_unavailable", detail: r.error }];
+  },
+  async history(q) {
+    const p = parseProductUrl(q.url);
+    if (p.error) return [400, { error: p.error }];
+    const [weekly, live] = await Promise.all([
+      p.source === "wildberries" ? fetchWbPriceHistory(p.product_id).catch(() => null) : Promise.resolve(null), fetchOne(p)]);
+    const h = buildHistory({ p, weekly: weekly || [], observed: getObservations(p.source, p.product_id), live: live.value || null });
+    if (!h) return [502, { error: "upstream_unavailable", detail: live.error || "no price available" }];
+    if (!h.title && live.hint?.title) h.title = live.hint.title;
+    if (!live.value && live.hint?.in_stock === false) h.note = [h.note, "The product is currently out of stock."].filter(Boolean).join(" ");
+    return [200, h];
+  },
+};
+for (const op of ["compare", "monitor", "history"]) {
+  app.get(`/product/${op}`, async (req, res) => { const [status, body] = await PRODUCT_OPS[op](req.query); res.status(status).json(body); }); // >=400 never settled
+}
 
 app.listen(PORT, HOST, () => console.log(`proxy=${describeProxy(proxyConfig())} x402-news listening on ${HOST}:${PORT} mode=${MODE} network=${NETWORK} facilitator=${FACILITATOR_TYPE} price=${PRICE} payTo=${PAY_TO || "-"} ingest=${INGEST_TOKEN ? "on" : "off"} parser=${parserConfigured() ? "on" : "off"} file=${NEWS_FILE}`));

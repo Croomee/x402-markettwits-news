@@ -244,6 +244,7 @@ export async function fetchProduct(p, { noCache = false } = {}) {
       if (b.value) {
         if (cache.size >= CACHE_MAX) cache.delete(cache.keys().next().value);
         cache.set(key, { at: Date.now(), ok: true, value: b.value });
+        recordObservation(b.value);
         return { ...b.value, cached: false };
       }
       browserHint = b.hint; browserAttempt = `[browser] no price (${b.hint.availability})`;
@@ -274,6 +275,7 @@ export async function fetchProduct(p, { noCache = false } = {}) {
   if (browserAttempt) attempts = [browserAttempt, ...(attempts || [])];
   if (!r) {
     const err = new UpstreamError(`${p.source} did not return product data: ${attempts.join("; ") || "no data"}`, attempts);
+    if (browserHint) err.hint = browserHint; // e.g. live "out of stock, no price" from the browser parser (title/rating known)
     cache.set(key, { at: Date.now(), ok: false, error: err });
     throw err;
   }
@@ -287,7 +289,53 @@ export async function fetchProduct(p, { noCache = false } = {}) {
   if (browserHint && browserHint.in_stock === false) { value.availability = "out_of_stock"; value.in_stock = false; } // live stock from the browser
   if (cache.size >= CACHE_MAX) cache.delete(cache.keys().next().value);
   cache.set(key, { at: Date.now(), ok: true, value });
+  recordObservation(value);
   return { ...value, cached: false };
+}
+
+// ---------- observed prices (in-memory, ephemeral: lost on every restart/redeploy) ----------
+// Every fresh successful fetch from any endpoint records {at, price}. Weekly-CDN fallback prices are not live, so skipped.
+const OBS_PER_PRODUCT = 200, OBS_PRODUCTS = 5000, OBS_MIN_GAP_MS = 10 * 60_000;
+const observations = new Map(); // "source:id" -> [{ at, price, original_price }]
+export function recordObservation(v, at = Date.now()) {
+  if (!v || typeof v.price?.amount !== "number" || v.price.as_of) return;
+  const key = `${v.source}:${v.product_id}`;
+  let list = observations.get(key);
+  if (!list) { if (observations.size >= OBS_PRODUCTS) observations.delete(observations.keys().next().value); list = []; observations.set(key, list); }
+  const last = list[list.length - 1];
+  if (last && last.price === v.price.amount && at - last.at < OBS_MIN_GAP_MS) return; // same price within 10 min: skip
+  list.push({ at, price: v.price.amount, ...(v.price.original_amount ? { original_price: v.price.original_amount } : {}) });
+  if (list.length > OBS_PER_PRODUCT) list.splice(0, list.length - OBS_PER_PRODUCT);
+}
+export const getObservations = (source, id) => [...(observations.get(`${source}:${id}`) || [])];
+export const clearObservations = () => observations.clear(); // tests
+
+// ---------- WB weekly price history (public static CDN, no anti-bot) ----------
+// basket-NN.wbbasket.ru/volV/partP/ID/info/price-history.json -> [{ dt: unix seconds, price: { RUB: kopecks } }]
+export function parseWbPriceHistory(json) {
+  if (!Array.isArray(json)) return [];
+  return json.map((x) => ({ dt: num(x?.dt), price: rub(x?.price?.RUB) })).filter((x) => x.dt && x.price !== null && x.price > 0)
+    .sort((a, b) => a.dt - b.dt).map((x) => ({ date: new Date(x.dt * 1000).toISOString().slice(0, 10), price: x.price }));
+}
+const historyCache = new Map(); // id -> { at, points|null }
+export async function fetchWbPriceHistory(id, { timeoutMs = 8000 } = {}) {
+  const hit = historyCache.get(id);
+  if (hit && Date.now() - hit.at < (hit.points ? 6 * 3600e3 : 10 * 60_000)) return hit.points;
+  const nm = Number(id), deadline = Date.now() + timeoutMs;
+  const one = async (b) => {
+    const r = await fetch(`${basketBase(b, nm)}/price-history.json`, { headers: { "User-Agent": UA, Accept: "application/json" },
+      signal: AbortSignal.timeout(Math.max(500, Math.min(4000, deadline - Date.now()))) });
+    if (!r.ok) { await r.body?.cancel().catch(() => {}); throw new Error(`HTTP ${r.status}`); }
+    return parseWbPriceHistory(await r.json());
+  };
+  let points = await one(wbBasketHost(nm)).catch(() => null);
+  if (!points && Date.now() < deadline - 500) {   // basket ranges change over time: probe all hosts in parallel
+    const hosts = Array.from({ length: 45 }, (_, i) => String(i + 1).padStart(2, "0")).filter((b) => b !== wbBasketHost(nm));
+    points = await Promise.any(hosts.map(one)).catch(() => null);
+  }
+  if (historyCache.size > 2000) historyCache.delete(historyCache.keys().next().value);
+  historyCache.set(id, { at: Date.now(), points: points && points.length ? points : null });
+  return points && points.length ? points : null;
 }
 
 // Raw CONNECT to the proxy (plain TCP; https:// proxies via TLS) -> the proxy's own reply (status line, headers, body head).
