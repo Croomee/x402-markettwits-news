@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import net from "node:net";
 import http from "node:http";
-import { startBridge } from "../bridge.mjs";
+import { startBridge, denied, DEFAULT_DENY } from "../bridge.mjs";
 
 // Minimal SOCKS5 server with username/password auth (RFC 1928/1929), CONNECT only.
 function socks5Server(user, pass) {
@@ -52,4 +52,13 @@ test("bridge returns 502 when SOCKS5 auth fails, and refuses plain HTTP", async 
     const code = await new Promise((r) => http.get({ host: "127.0.0.1", port: br.port, path: "http://example.com/" }, (res) => { res.resume(); r(res.statusCode); }));
     assert.equal(code, 501);
   } finally { await br.close(); srv.close(); }
+});
+
+test("bridge refuses Chromium background hosts (saves proxy traffic)", async () => {
+  const list = DEFAULT_DENY.split(",");
+  assert.equal(denied("update.googleapis.com", list), true); assert.equal(denied("accounts.google.com", list), true);
+  assert.equal(denied("www.wildberries.ru", list), false); assert.equal(denied("notgoogle.com", list), false);
+  const br = await startBridge({ host: "127.0.0.1", port: 9, username: "u", password: "p" });
+  try { const { status, sock } = await connectVia(br.port, "accounts.google.com:443"); sock.destroy(); assert.equal(status, 403); }
+  finally { await br.close(); }
 });

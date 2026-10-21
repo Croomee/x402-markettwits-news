@@ -99,8 +99,14 @@ site's own JSON (WB `__internal/u-card/cards/v4/detail`; Ozon entrypoint-api / l
 - Chromium cannot use a SOCKS5 proxy with a password, so a `socks5://` / `socks5h://` `PROXY_URL` is served through a
   built-in loopback HTTP-CONNECT bridge (`parser/bridge.mjs`). `http://USER:PASS@host:port` proxies are passed to
   Chromium directly.
-- Memory: Chromium with a warm WB tab ≈ 500–800 MB. Use ≥ 2 GB RAM, or swap (the setup script adds a 2 GB swapfile
-  when RAM < 2 GB and there is no swap). The unit has `MemoryMax=1600M` and restarts daily.
+- Memory: Chromium with a warm WB tab ≈ 500–800 MB. On < 1.5 GB RAM the setup script sets `CONCURRENCY=1` and
+  `LOW_MEMORY=1` (fewer renderer processes, smaller JS heap); it adds a 2 GB swapfile when RAM < 2 GB and there is no
+  swap. The unit has `MemoryMax=1200M` and restarts daily. The SOCKS bridge refuses Chromium's own Google background
+  hosts (`BRIDGE_DENY`) so they don't consume proxy traffic.
+- Setup script: logs every step to `/var/log/x402-parser-setup.log` and prints the failing step + log tail; `--debug`
+  for `set -x`. Node 20 goes to `/usr/local` from the official tarball (nodejs.org → npmmirror.com), leaving an apt
+  nodejs (e.g. Ubuntu 24.04's v18) untouched; NodeSource is only a fallback. npm falls back to registry.npmmirror.com,
+  Chromium to npmmirror.com/mirrors/playwright, then the distro `chromium` package (Debian; not Ubuntu's snap).
 
 Install / update on the VPS (root; re-run to update, keeps the token):
 

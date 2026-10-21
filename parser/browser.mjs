@@ -8,6 +8,7 @@ import { parseProxyUrl, maskSecrets, mapWbCard, mapLdJson, mapOzonWidgets, merge
 const STATE_FILE = process.env.STATE_FILE || path.join(process.env.STATE_DIR || "/var/lib/x402-parser", "storage-state.json");
 const HEADLESS = !/^(0|false|no)$/i.test(process.env.HEADLESS || "");
 const BLOCK = new Set((process.env.BLOCK_RESOURCES ?? "image,media,font").split(",").map((s) => s.trim()).filter(Boolean));
+const LOW_MEMORY = /^(1|true|yes)$/i.test(process.env.LOW_MEMORY || ""); // small VPS (~1 GB RAM): fewer renderers, smaller JS heap
 const WB_DEST = process.env.WB_DEST || "-1257786"; // Moscow delivery region
 
 export class ParseError extends Error { constructor(code, msg) { super(msg); this.code = code; } }
@@ -25,8 +26,12 @@ async function start() {
   } else if (proxy) {
     pw = { server: `${proxy.scheme}://${proxy.host}:${proxy.port}`, ...(proxy.username ? { username: proxy.username, password: proxy.password } : {}) };
   }
-  browser = await chromium.launch({ headless: HEADLESS, channel: process.env.CHROMIUM_CHANNEL || "chromium", proxy: pw,
-    args: ["--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage", "--no-first-run", "--lang=ru-RU"] });
+  const exe = String(process.env.CHROMIUM_EXECUTABLE || "").trim(); // distro chromium fallback (setup script) instead of Playwright's build
+  browser = await chromium.launch({ headless: HEADLESS, ...(exe ? { executablePath: exe } : { channel: process.env.CHROMIUM_CHANNEL || "chromium" }), proxy: pw,
+    args: ["--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage", "--no-first-run", "--lang=ru-RU",
+      "--disable-gpu", "--disable-extensions", "--disable-background-networking", "--disable-component-update", "--mute-audio",
+      ...(LOW_MEMORY ? ["--renderer-process-limit=2", "--js-flags=--max-old-space-size=320", "--disable-features=Translate,MediaRouter,OptimizationHints",
+        "--disk-cache-size=33554432"] : [])] });
   const major = browser.version().split(".")[0];
   // UA must match the real engine + OS, otherwise the WB challenge loops (HeadlessChrome UA gets 498 forever).
   const userAgent = process.env.USER_AGENT || `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${major}.0.0.0 Safari/537.36`;

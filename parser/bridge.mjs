@@ -4,12 +4,17 @@
 import http from "node:http";
 import { SocksClient } from "socks";
 
-export function startBridge(cfg, { port = 0, host = "127.0.0.1", timeoutMs = 20000, log = () => {} } = {}) {
+// Chromium's own background traffic (updates, sign-in, safe-browsing) would burn paid residential-proxy bandwidth.
+export const DEFAULT_DENY = "google.com,googleapis.com,gstatic.com,gvt1.com,gvt2.com,googleusercontent.com,doubleclick.net,google-analytics.com,googletagmanager.com";
+export const denied = (host, list) => list.some((d) => host === d || host.endsWith("." + d));
+export function startBridge(cfg, { port = 0, host = "127.0.0.1", timeoutMs = 20000, log = () => {},
+  deny = String(process.env.BRIDGE_DENY ?? DEFAULT_DENY).split(",").map((s) => s.trim().toLowerCase()).filter(Boolean) } = {}) {
   const server = http.createServer((req, res) => { res.writeHead(501, { "content-type": "text/plain" }); res.end("CONNECT only"); });
   server.on("connect", async (req, client, head) => {
     const m = /^\[?([^\]]+?)\]?:(\d+)$/.exec(req.url || "");
     if (!m) { client.end("HTTP/1.1 400 Bad Request\r\n\r\n"); return; }
     client.on("error", () => {});
+    if (denied(m[1].toLowerCase(), deny)) { client.end("HTTP/1.1 403 Forbidden\r\n\r\n"); return; }
     try {
       const { socket } = await SocksClient.createConnection({
         proxy: { host: cfg.host, port: Number(cfg.port), type: 5,
