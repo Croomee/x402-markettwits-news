@@ -21,6 +21,8 @@ import { describeProxy } from "./proxy-config.mjs";
 import { parserConfigured } from "./parser-client.mjs";
 import { parseTerms, matchesTerms, parseNumParam, isoSec, buildSummary, topTopics, recentSummary, alertsNew, trending,
   parseFloatParam, parseCursorId, newsSince, normalizeCountryCode, countryNews, movers, dataSurprises, sentiment, digest } from "./news-logic.mjs";
+import { parseIsoDate, parseCodes, parseTicker, parseIndexCodes, getFx, getKeyRate, getQuote, getIndex, getMovers, getFuel } from "./ru-data.mjs";
+import { normalizeChannel, parseChannelList, channelLatest, channelSearch } from "./tg.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 4021);
@@ -373,6 +375,70 @@ const DIGEST_OUTPUT_SCHEMA = { type: "object", required: ["hours", "count", "sec
   sections: { type: "object", properties: Object.fromEntries(["central_banks", "macro", "energy", "equities", "crypto", "geopolitics"].map((k) => [k, DIGEST_SECTION_SCHEMA])) },
   unclassified_count: { type: "integer" }, top_topics: TOPIC_COUNT_SCHEMA, note: { type: "string" } } };
 const EX_BRIEF = { id: 389795, published_at: "2026-10-21T10:02:00Z", importance: "high", headline: "SPCX = +9%: SpaceX posted a quarterly profit for the first time", source_url: "https://t.me/markettwits/389795" };
+// ---------- RU market data + Telegram (cbr.ru, iss.moex.com, rosstat.gov.ru, t.me) ----------
+const STR = { type: "string" }, STRN = { type: ["string", "null"] }, INT = { type: "integer" }, NUM = { type: "number" }, INTN = { type: ["integer", "null"] };
+const META_PROPS = { source: STR, via: { type: "string", enum: ["direct", "proxy"] }, cached: { type: "boolean" },
+  stale: { type: "boolean", description: "true when the upstream failed and a recent cached copy was served" }, fetched_at: { type: "string", format: "date-time" } };
+const NOT_FOUND_404 = (what) => ({ 404: { description: `${what} The x402 payment is not settled.`,
+  content: { "application/json": { schema: { type: "object", required: ["error"], properties: { error: { type: "string", enum: ["not_found"] }, detail: STR } } } } } });
+const FX_RATE_SCHEMA = { type: "object", required: ["code", "nominal", "value", "per_unit"], properties: { code: STR, name: STRN, nominal: INT,
+  value: { type: "number", description: "RUB per `nominal` units" }, per_unit: { type: "number", description: "RUB per 1 unit" },
+  prev_per_unit: NUMN, change: NUMN, change_pct: NUMN } };
+const FX_OUTPUT_SCHEMA = { type: "object", required: ["base", "date", "count", "rates"], properties: { ...META_PROPS, base: { type: "string", enum: ["RUB"] },
+  date: { type: "string", format: "date", description: "Date the official rates are set for" }, requested_date: STRN, previous_date: STRN,
+  count: INT, rates: { type: "array", items: FX_RATE_SCHEMA }, missing: { type: "array", items: STR, description: "Requested codes CBR does not quote" }, note: STR } };
+const KEYRATE_OUTPUT_SCHEMA = { type: "object", required: ["rate", "as_of", "changes"], properties: { ...META_PROPS, unit: STR,
+  rate: { type: "number", description: "Current key rate, % per annum" }, as_of: { type: "string", format: "date" }, effective_since: STRN,
+  previous_rate: NUMN, last_change_bp: INTN, months: INT, max_in_window: NUM, min_in_window: NUM,
+  changes: { type: "array", description: "Rate changes in the window, newest first", items: { type: "object", properties: {
+    date: { type: "string", format: "date" }, rate: NUM, prev_rate: NUM, change_bp: INT } } } } };
+const QUOTE_OUTPUT_SCHEMA = { type: "object", required: ["ticker", "board", "price", "price_source", "delayed"], properties: { ...META_PROPS,
+  ticker: STR, board: STR, short_name: STRN, name: STRN, isin: STRN, currency: STRN, lot_size: INTN,
+  price: { ...NUMN, description: "Last trade, or previous close before the first trade of the session" },
+  price_source: { type: "string", enum: ["last_trade", "previous_close"] }, last: NUMN, prev_close: NUMN, prev_date: STRN,
+  change: NUMN, change_pct: NUMN, open: NUMN, high: NUMN, low: NUMN, bid: NUMN, offer: NUMN, waprice: NUMN, volume: NUMN, value_rub: NUMN,
+  num_trades: INTN, market_cap_rub: NUMN, trading_status: STRN, updated_at: STRN, trade_date: STRN, note: STR,
+  delayed: { type: "boolean", enum: [true] }, delay_minutes: INT, note_delay: STR } };
+const INDEX_ITEM_SCHEMA = { type: "object", required: ["code"], properties: { code: STR, name: STRN, value: NUMN, prev_close: NUMN, change: NUMN, change_pct: NUMN,
+  open: NUMN, high: NUMN, low: NUMN, month_change_pct: NUMN, year_change_pct: NUMN, annual_high: NUMN, annual_low: NUMN,
+  value_traded_rub: NUMN, currency: STRN, trade_date: STRN, updated_at: STRN } };
+const INDEX_OUTPUT_SCHEMA = { type: "object", required: ["mode", "count", "items"], properties: { ...META_PROPS,
+  mode: { type: "string", enum: ["quote", "list"], description: "list when code=list (items are {code, name})" }, count: INT,
+  items: { type: "array", items: INDEX_ITEM_SCHEMA }, missing: { type: "array", items: STR }, delayed: { type: "boolean" }, delay_minutes: INT, note_delay: STR } };
+const MOEX_MOVER_SCHEMA = { type: "object", required: ["ticker", "pct"], properties: { ticker: STR, name: STRN, price: NUMN,
+  pct: { type: "number", description: "Change vs previous close, %" }, value: { ...NUMN, description: "Turnover, RUB" }, prev_close: NUMN, updated_at: STRN, trade_date: STRN } };
+const MOEX_MOVERS_OUTPUT_SCHEMA = { type: "object", required: ["mode", "gainers", "losers"], properties: { ...META_PROPS, board: STR,
+  mode: { type: "string", enum: ["live", "previous_session"], description: "previous_session before the first trades of the day" },
+  as_of: STRN, limit: INT, min_value_rub: NUM, universe: INT, advancers: INT, decliners: INT, unchanged: INT,
+  gainers: { type: "array", items: MOEX_MOVER_SCHEMA }, losers: { type: "array", items: MOEX_MOVER_SCHEMA }, note: STR,
+  delayed: { type: "boolean" }, delay_minutes: INT, note_delay: STR } };
+const FUEL_PRICE_SCHEMA = { type: "object", required: ["fuel", "price", "as_of"], properties: {
+  fuel: { type: "string", enum: ["ai92", "ai95", "ai98", "diesel", "petrol_avg"] }, name: STR, label_ru: STRN, price: { type: "number", description: "RUB per litre" },
+  as_of: { type: "string", format: "date" }, prev_price: NUMN, prev_date: STRN, change: NUMN, change_pct: NUMN, change_4w_pct: NUMN, change_ytd_pct: NUMN,
+  history: { type: "array", items: { type: "object", properties: { date: { type: "string", format: "date" }, price: NUM } } } } };
+const FUEL_OUTPUT_SCHEMA = { type: "object", required: ["as_of", "unit", "prices", "source_url"], properties: { ...META_PROPS, source_url: { type: "string", format: "uri" },
+  as_of: STRN, unit: STR, region: STR, prices: { type: "array", items: FUEL_PRICE_SCHEMA }, note: STR, stale_reason: STR } };
+const TG_MSG_SCHEMA = { type: "object", required: ["id", "channel", "date", "text", "link"], properties: { id: INT, channel: STR,
+  date: { type: ["string", "null"], format: "date-time" }, text: STR, views: INTN, views_raw: STRN, link: { type: "string", format: "uri" },
+  media: { type: "array", items: { type: "string", enum: ["photo", "video", "document", "poll"] } }, edited: { type: "boolean" }, forwarded_from: STR } };
+const TG_LATEST_OUTPUT_SCHEMA = { type: "object", required: ["channel", "count", "items"], properties: { ...META_PROPS, channel: STR, title: STRN,
+  subscribers: INTN, subscribers_raw: STRN, count: INT, pages: INT, items: { type: "array", items: TG_MSG_SCHEMA, description: "Newest first" } } };
+const TG_SEARCH_OUTPUT_SCHEMA = { type: "object", required: ["query", "channels", "count", "items", "per_channel"], properties: { ...META_PROPS,
+  query: STR, channels: { type: "array", items: STR }, count: INT, items: { type: "array", items: TG_MSG_SCHEMA, description: "Merged, newest first" },
+  per_channel: { type: "array", items: { type: "object", properties: { channel: STR, title: STRN, count: INT, error: STR, detail: STR } } }, note: STR } };
+const FX_DATE_PARAM = { type: "string", format: "date", description: "Rates date YYYY-MM-DD (default: latest set by CBR; 1992-07-01 .. tomorrow)" };
+const FX_CODES_PARAM = { type: "string", pattern: "^[A-Za-z]{3}(,[A-Za-z]{3}){0,29}$", description: "Comma-separated ISO currency codes (default: all ~55 CBR currencies), e.g. USD,EUR,CNY" };
+const MONTHS_PARAM = { type: "integer", minimum: 1, maximum: 120, default: 24, description: "History window in months for `changes` (default 24, max 120)" };
+const TICKER_PARAM = { type: "string", pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,11}$", description: "MOEX ticker (SECID) on the shares market, e.g. SBER, GAZP, LKOH, YDEX, T" };
+const INDEX_CODE_PARAM = { type: "string", pattern: "^([A-Za-z0-9]{2,16}(,[A-Za-z0-9]{2,16}){0,4}|list)$", default: "IMOEX",
+  description: "Index code(s), up to 5 comma-separated (default IMOEX; e.g. RTSI, MOEXBMI, MOEXOG), or `list` for the catalogue of stock indices" };
+const MOVERS_LIMIT_PARAM = { type: "integer", minimum: 1, maximum: 50, default: 10, description: "Gainers and losers to return (each side, default 10, max 50)" };
+const MIN_VALUE_PARAM = { type: "string", pattern: "^[0-9]+([.,][0-9]+)?$", default: "5000000", description: "Minimum turnover in RUB to count a stock (default 5000000; filters illiquid names)" };
+const WEEKS_PARAM = { type: "integer", minimum: 0, maximum: 52, default: 4, description: "Weekly history points to include per fuel (0-52, default 4)" };
+const CHANNEL_PARAM = { type: "string", pattern: "^@?[A-Za-z][A-Za-z0-9_]{3,31}$", description: "Public Telegram channel username (5-32 chars; '@name' or a t.me link also accepted), e.g. markettwits" };
+const CHANNELS_PARAM = { type: "string", description: "1-5 comma-separated public channel usernames, e.g. markettwits,rbc_news" };
+const TG_LIMIT_PARAM = { type: "integer", minimum: 1, maximum: 50, default: 20, description: "Messages to return (default 20, max 50)" };
+const DATA_502 = (what) => UPSTREAM_502(`${what} unreachable or returned an unexpected response.`);
 const EX_T = "2026-10-20T12:20:00Z";
 const PAID_ROUTES = [
   { path: "/news/latest", operationId: "getLatestNews", summary: "Latest translated MarketTwits news (newest first)",
@@ -490,6 +556,100 @@ const PAID_ROUTES = [
     outputSchema: DIGEST_OUTPUT_SCHEMA, ok200: "Digest",
     outputExample: { hours: 24, since: "2026-10-20T16:00:00Z", count: 228, high_count: 70, unclassified_count: 54,
       sections: { equities: { count: 28, high_count: 7, items: [EX_BRIEF] } }, top_topics: [{ topic: "Ukraine", count: 12 }] } },
+  { path: "/ru/fx", operationId: "getCbrFxRates", price: "$0.0015", tags: ["ru-data"],
+    summary: "Official Bank of Russia FX rates (RUB) with day-over-day change",
+    description: "CBR official exchange rates from cbr.ru XML_daily.asp for a date (default: the latest set) and optional currency codes: " +
+      "per currency nominal, value (RUB per nominal), per_unit (RUB per 1 unit), previous set's per_unit, change and change_pct. Cached 30 min (past dates 7 days).",
+    params: { date: FX_DATE_PARAM, codes: FX_CODES_PARAM }, required: [], example: { codes: "USD,EUR,CNY" }, badRequest: true,
+    badRequestText: "date is not YYYY-MM-DD in 1992-07-01..tomorrow, or codes is not a comma list of 3-letter codes (max 30). Returned before payment.",
+    outputSchema: FX_OUTPUT_SCHEMA, ok200: "CBR rates",
+    outputExample: { source: "Bank of Russia (cbr.ru/scripts/XML_daily.asp)", base: "RUB", date: "2026-10-22", requested_date: null, previous_date: "2026-10-21", count: 2,
+      rates: [{ code: "USD", name: "Доллар США", nominal: 1, value: 81.9739, per_unit: 81.9739, prev_per_unit: 82.8879, change: -0.914, change_pct: -1.103 },
+        { code: "CNY", name: "Юань", nominal: 1, value: 12.2806, per_unit: 12.2806, prev_per_unit: 12.3708, change: -0.0902, change_pct: -0.729 }],
+      missing: [], note: "Official CBR rate", via: "direct", cached: false, fetched_at: "2026-10-22T03:51:31Z" },
+    extraResponses: DATA_502("cbr.ru") },
+  { path: "/ru/key-rate", operationId: "getCbrKeyRate", price: "$0.0015", tags: ["ru-data"],
+    summary: "Bank of Russia key rate: current level, since when, and recent changes",
+    description: "Current CBR key rate (% p.a.) from the cbr.ru DailyInfo web service (KeyRateXML; the hd_base/KeyRate page as fallback): rate, as_of, " +
+      "effective_since, previous_rate, last_change_bp and every change in the last `months` (default 24) newest first, plus min/max in the window. Cached 3 h.",
+    params: { months: MONTHS_PARAM }, required: [], example: { months: 24 }, badRequest: true, badRequestText: "months is not a number. Returned before payment.",
+    outputSchema: KEYRATE_OUTPUT_SCHEMA, ok200: "Key rate",
+    outputExample: { source: "Bank of Russia key rate (cbr.ru DailyInfoWebServ KeyRateXML)", unit: "% per annum", rate: 14, as_of: "2026-10-21", effective_since: "2026-07-27",
+      previous_rate: 14.25, last_change_bp: -25, months: 24, changes: [{ date: "2026-07-27", rate: 14, prev_rate: 14.25, change_bp: -25 }],
+      max_in_window: 21, min_in_window: 14, via: "direct", cached: false, fetched_at: "2026-10-22T03:51:31Z" },
+    extraResponses: DATA_502("cbr.ru") },
+  { path: "/moex/quote", operationId: "getMoexQuote", price: "$0.003", tags: ["ru-data"],
+    summary: "Moscow Exchange stock quote (delayed ~15 min): price, change, volume, bid/offer",
+    description: "One MOEX shares-market ticker from MOEX ISS (main board TQBR when listed): price (last trade, or previous close before the session's first trade), " +
+      "change/change_pct vs previous close, open/high/low, bid/offer, volume, value_rub, market cap, trading status. Data is delayed ~15 minutes (delayed: true). Unknown ticker -> 404 (not settled).",
+    params: { ticker: TICKER_PARAM }, required: ["ticker"], example: { ticker: "SBER" }, badRequest: true,
+    badRequestText: "ticker missing (with a payment attached) or not 1-12 letters/digits. Returned before payment.",
+    outputSchema: QUOTE_OUTPUT_SCHEMA, ok200: "Quote",
+    outputExample: { ticker: "SBER", board: "TQBR", short_name: "Сбербанк", name: "Сбербанк России ПАО ао", isin: "RU0009029540", currency: "RUB", lot_size: 1,
+      price: 292.4, price_source: "last_trade", last: 292.4, prev_close: 291.62, prev_date: "2026-10-21", change: 0.78, change_pct: 0.27, open: 291.9, high: 293.1, low: 291.2,
+      volume: 4100000, value_rub: 1198000000, num_trades: 21000, trading_status: "T", updated_at: "2026-10-22T11:05:00+03:00", trade_date: "2026-10-22",
+      delayed: true, delay_minutes: 15, source: "MOEX ISS (iss.moex.com)", cached: false, fetched_at: "2026-10-22T08:20:00Z" },
+    extraResponses: { ...NOT_FOUND_404("Ticker not found on the MOEX shares market."), ...DATA_502("iss.moex.com") } },
+  { path: "/moex/index", operationId: "getMoexIndex", price: "$0.003", tags: ["ru-data"],
+    summary: "MOEX index values (IMOEX, RTSI, sector indices) or the index catalogue",
+    description: "Index level, change/change_pct vs previous close, open/high/low, month/year change, annual high/low and traded value for up to 5 codes " +
+      "(default IMOEX), or code=list for the catalogue of MOEX stock indices (SNDX board + RTS*). Delayed ~15 minutes. Unknown codes -> 404 (not settled).",
+    params: { code: INDEX_CODE_PARAM }, required: [], example: { code: "IMOEX,RTSI" }, badRequest: true,
+    badRequestText: "code is not up to 5 comma-separated index codes (2-16 letters/digits) or `list`. Returned before payment.",
+    outputSchema: INDEX_OUTPUT_SCHEMA, ok200: "Index values or catalogue",
+    outputExample: { mode: "quote", count: 1, items: [{ code: "IMOEX", name: "Индекс МосБиржи", value: 2447.83, prev_close: 2469.75, change: -21.92, change_pct: -0.89,
+      open: 2476.11, high: 2480.56, low: 2428.15, month_change_pct: 7.99, year_change_pct: -11.52, annual_high: 2912.01, annual_low: 1898.51,
+      value_traded_rub: 87708483202, currency: "RUB", trade_date: "2026-10-21", updated_at: "2026-10-21T23:50:03+03:00" }], missing: [],
+      source: "MOEX ISS (iss.moex.com)", delayed: true, delay_minutes: 15, cached: false, fetched_at: "2026-10-22T03:51:31Z" },
+    extraResponses: { ...NOT_FOUND_404("Index code not found."), ...DATA_502("iss.moex.com") } },
+  { path: "/moex/movers", operationId: "getMoexMovers", price: "$0.004", tags: ["ru-data"],
+    summary: "Top gainers and losers on the Moscow Exchange main board (TQBR), with market breadth",
+    description: "Ranks TQBR shares by change vs previous close (turnover >= min_value RUB, default 5 mln): top `limit` gainers and losers (default 10, max 50), " +
+      "advancers/decliners/unchanged. Before the session's first trades (mode previous_session) it ranks the last completed session from ISS history. Delayed ~15 minutes.",
+    params: { limit: MOVERS_LIMIT_PARAM, min_value: MIN_VALUE_PARAM }, required: [], example: { limit: 10 }, badRequest: true,
+    badRequestText: "limit or min_value is not a number. Returned before payment.",
+    outputSchema: MOEX_MOVERS_OUTPUT_SCHEMA, ok200: "Movers",
+    outputExample: { board: "TQBR", mode: "previous_session", as_of: "2026-10-21", limit: 2, min_value_rub: 5000000, universe: 188, advancers: 60, decliners: 124, unchanged: 4,
+      gainers: [{ ticker: "URKZ", name: "УрКузница", price: 273.6, pct: 10.06, value: 36678042.2, trade_date: "2026-10-21" }],
+      losers: [{ ticker: "AFKS", name: "Система ао", price: 7.828, pct: -2.13, value: 1062601090, trade_date: "2026-10-21" }],
+      delayed: true, delay_minutes: 15, source: "MOEX ISS (iss.moex.com), board TQBR (main shares board)", cached: false, fetched_at: "2026-10-22T03:51:31Z" },
+    extraResponses: DATA_502("iss.moex.com") },
+  { path: "/ru/fuel", operationId: "getRuFuelPrices", price: "$0.003", tags: ["ru-data"],
+    summary: "Russian retail fuel prices (AI-92/95/98, diesel) — Rosstat weekly averages",
+    description: "Average retail pump prices across Russia from Rosstat's weekly release (rosstat.gov.ru nedel_sred_cen.xlsx): price (RUB/l), as_of, week-over-week change, " +
+      "4-week and year-to-date change and `weeks` of history per fuel. Rosstat publishes weekly (usually Wednesday, prices as of Monday); cached 6 h, a stale copy (stale: true) " +
+      "is served for up to 14 days if Rosstat is unreachable.",
+    params: { weeks: WEEKS_PARAM }, required: [], example: { weeks: 4 }, badRequest: true, badRequestText: "weeks is not a number. Returned before payment.",
+    outputSchema: FUEL_OUTPUT_SCHEMA, ok200: "Fuel prices",
+    outputExample: { source: "Rosstat: weekly average consumer prices for selected goods, Russian Federation (nedel_sred_cen.xlsx)",
+      source_url: "https://rosstat.gov.ru/storage/mediabank/nedel_sred_cen.xlsx", as_of: "2026-10-12", unit: "RUB per litre", region: "Russian Federation (average)",
+      prices: [{ fuel: "ai92", name: "Petrol AI-92", label_ru: "Бензин автомобильный марки АИ-92, л", price: 74.71, as_of: "2026-10-12", prev_price: 74.72, prev_date: "2026-10-05",
+        change: -0.01, change_pct: -0.01, change_4w_pct: 0.15, change_ytd_pct: 20.38, history: [{ date: "2026-10-12", price: 74.71 }, { date: "2026-10-05", price: 74.72 }] }],
+      note: "Rosstat publishes weekly", via: "direct", cached: false, fetched_at: "2026-10-22T03:51:31Z" },
+    extraResponses: DATA_502("rosstat.gov.ru") },
+  { path: "/tg/channel/latest", operationId: "getTelegramChannelLatest", price: "$0.004", tags: ["telegram"],
+    summary: "Latest posts of a public Telegram channel (text, date, views, link)",
+    description: "Reads the public web preview t.me/s/<channel> (no login): newest `limit` posts (default 20, max 50) with id, date, text (HTML stripped, emoji kept), " +
+      "views, link, media types and channel title/subscribers. Channels without a public preview or that do not exist -> 404 (not settled). Cached 2 min.",
+    params: { channel: CHANNEL_PARAM, limit: TG_LIMIT_PARAM }, required: ["channel"], example: { channel: "markettwits", limit: 20 }, badRequest: true,
+    badRequestText: "channel missing (with a payment attached) or not a valid username, or limit not a number. Returned before payment.",
+    outputSchema: TG_LATEST_OUTPUT_SCHEMA, ok200: "Channel posts",
+    outputExample: { channel: "markettwits", title: "MarketTwits", subscribers: 339000, subscribers_raw: "339K", count: 1, pages: 1,
+      items: [{ id: 389929, channel: "markettwits", date: "2026-10-21T19:19:52+00:00", text: "⚠️🇺🇸#META #spo #ии\nMeta ... — Semafor", views: 39000, views_raw: "39K",
+        link: "https://t.me/markettwits/389929", media: [], edited: true }], source: "https://t.me/s/markettwits (public web preview)", cached: false, fetched_at: "2026-10-22T03:51:36Z" },
+    extraResponses: { ...NOT_FOUND_404("Channel not found or no public web preview."), ...DATA_502("t.me") } },
+  { path: "/tg/search", operationId: "searchTelegramChannels", price: "$0.006", tags: ["telegram"],
+    summary: "Search up to 5 public Telegram channels for a keyword",
+    description: "Runs Telegram's own channel search (t.me/s/<channel>?q=) on 1-5 public channels, merges the matches newest first (up to `limit`, default 20) " +
+      "with per-channel counts/errors. 404 when no channel exists, 502 when all fail; partial failures are reported in per_channel.",
+    params: { q: Q_PARAM, channels: CHANNELS_PARAM, limit: TG_LIMIT_PARAM }, required: ["q", "channels"], example: { q: "нефть", channels: "markettwits,rbc_news" }, badRequest: true,
+    badRequestText: "q missing/empty/longer than 100 chars, channels missing/invalid/more than 5, or limit not a number (missing params with a payment attached). Returned before payment.",
+    outputSchema: TG_SEARCH_OUTPUT_SCHEMA, ok200: "Matches",
+    outputExample: { query: "нефть", channels: ["markettwits", "rbc_news"], count: 1,
+      items: [{ id: 389883, channel: "markettwits", date: "2026-10-21T14:30:11+00:00", text: "#нефть ...", views: 41000, views_raw: "41K", link: "https://t.me/markettwits/389883", media: [], edited: false }],
+      per_channel: [{ channel: "markettwits", title: "MarketTwits", count: 20 }, { channel: "rbc_news", title: "РБК. Новости. Главное", count: 20 }],
+      source: "https://t.me/s/<channel>?q= (public web preview)", fetched_at: "2026-10-22T03:51:36Z" },
+    extraResponses: { ...NOT_FOUND_404("None of the channels exist / have a public preview."), ...DATA_502("t.me") } },
   { path: "/product/info", operationId: "getProductInfo", price: "$0.004", tags: ["product"],
     summary: "Wildberries / Ozon product card: title, price (RUB), rating, reviews, stock",
     description: "Live product data for a Wildberries (wildberries.ru, wb.ru) or Ozon (ozon.ru) product URL: title, current price in RUB " +
@@ -606,8 +766,9 @@ app.get("/openapi.json", async (req, res) => {
       version: "1.0.0",
       description: "Real-time English translations of MarketTwits (top Russian financial Telegram channel). Covers macro, " +
         "central banks, oil/commodities, geopolitics, equities and crypto. Items are tagged high/medium importance and " +
-        "updated every few minutes. Ideal for trading bots and news agents.",
-      "x-guidance": `Nineteen paid endpoints via x402 (USDC, scheme exact, network ${NETWORK}` +
+        "updated every few minutes. Ideal for trading bots and news agents. Also sells Russian market data (CBR FX and key rate, " +
+        "MOEX quotes/indices/movers, Rosstat fuel prices), public Telegram channel reading/search and Wildberries/Ozon product data.",
+      "x-guidance": `Twenty-seven paid endpoints via x402 (USDC, scheme exact, network ${NETWORK}` +
         `${paid ? `, payTo ${PAY_TO}` : ""}). Feed endpoints, ${PRICE} each: ` +
         `GET /news/latest?limit=N - full feed (high+medium), use for polling/monitoring all market news. ` +
         `GET /news/important?limit=N - only importance=high, use when you want market-moving headlines only. ` +
@@ -631,6 +792,15 @@ app.get("/openapi.json", async (req, res) => {
         `GET /news/data-surprises?hours=24&q=CPI ($0.006) - macro releases and earnings vs. expectations (actual, expected, previous, surprise, direction); ` +
         `GET /news/sentiment?q=WORDS&hours=24 ($0.005) - heuristic lexicon tone: bullish/bearish/neutral counts and score in [-1,1] (method: heuristic); ` +
         `GET /news/digest?hours=24 ($0.01) - sectioned briefing (central_banks, macro, energy, equities, crypto, geopolitics) with up to 5 headlines each. ` +
+        `Russian market data: GET /ru/fx?codes=USD,EUR&date=YYYY-MM-DD ($0.0015) - official CBR rates (RUB per unit) with change vs the previous set; ` +
+        `GET /ru/key-rate?months=24 ($0.0015) - CBR key rate, effective_since, previous rate and the list of changes; ` +
+        `GET /moex/quote?ticker=SBER ($0.003) - Moscow Exchange quote (price, change_pct, OHLC, volume, bid/offer), delayed ~15 min; ` +
+        `GET /moex/index?code=IMOEX ($0.003) - index level/change for up to 5 codes (IMOEX, RTSI, ...) or code=list; ` +
+        `GET /moex/movers?limit=10 ($0.004) - top TQBR gainers/losers and breadth (previous session before the open); ` +
+        `GET /ru/fuel?weeks=4 ($0.003) - Rosstat weekly average pump prices AI-92/95/98 and diesel (RUB/l, as_of, weekly/4-week/YTD change). ` +
+        `Telegram: GET /tg/channel/latest?channel=NAME&limit=20 ($0.004) - newest posts of a public channel (id, date, text, views, link); ` +
+        `GET /tg/search?q=WORDS&channels=a,b ($0.006) - keyword search across up to 5 public channels. Upstream failures return 502 and unknown ticker/index/channel 404, ` +
+        `neither is settled; invalid parameters return 400 before payment. ` +
         `Marketplace endpoint: GET /product/info?url=PRODUCT_URL ($0.004) - live Wildberries (wildberries.ru/wb.ru /catalog/<id>/) or ` +
         `Ozon (ozon.ru /product/<slug>-<id>/) product data {source, product_id, title, price:{amount, currency:'RUB', original_amount?}, ` +
         `rating, reviews_count, availability, in_stock}; a bad or foreign url returns 400 before payment, and if the marketplace ` +
@@ -744,6 +914,58 @@ app.get("/news/country", numCheck("hours", HOURS_DAY), (req, res, next) => {
 app.get("/news/data-surprises", numCheck("hours", HOURS_DAY), optQCheck);
 app.get("/news/sentiment", numCheck("hours", HOURS_DAY), preCheckQ);
 app.get("/news/digest", numCheck("hours", HOURS_DIGEST));
+// ---------- RU data + Telegram: one table drives pre-payment validation, the paid handlers and the admin probe ----------
+const MONTHS_OPT = { def: 24, min: 1, max: 120 }, MOVERS_LIMIT = { def: 10, min: 1, max: 50 }, MIN_VALUE = { def: 5e6, min: 0, max: 1e12 };
+const WEEKS_OPT = { def: 4, min: 0, max: 52 }, TG_LIMIT = { def: 20, min: 1, max: 50 };
+const isNum = (q, k, o) => parseNumParam(q[k], o) !== null;
+const DATA_OPS = {
+  "/ru/fx": { op: "ru-fx", required: [],
+    validate: (q) => (q.date !== undefined && parseIsoDate(q.date) === null ? "date must be YYYY-MM-DD between 1992-07-01 and tomorrow"
+      : q.codes !== undefined && parseCodes(q.codes) === null ? "codes must be a comma list of 3-letter currency codes (max 30), e.g. USD,EUR" : null),
+    run: (q) => getFx({ date: q.date === undefined ? null : parseIsoDate(q.date), codes: q.codes === undefined ? null : parseCodes(q.codes) }) },
+  "/ru/key-rate": { op: "ru-key-rate", required: [], validate: (q) => (isNum(q, "months", MONTHS_OPT) ? null : "months must be a number"),
+    run: (q) => getKeyRate({ months: parseNumParam(q.months, MONTHS_OPT) }) },
+  "/moex/quote": { op: "moex-quote", required: ["ticker"],
+    validate: (q) => (parseTicker(q.ticker) === null ? "ticker is required: a MOEX ticker such as SBER (1-12 letters/digits)" : null),
+    run: (q) => getQuote(parseTicker(q.ticker)) },
+  "/moex/index": { op: "moex-index", required: [],
+    validate: (q) => (q.code !== undefined && parseIndexCodes(q.code) === null ? "code must be up to 5 comma-separated index codes (e.g. IMOEX,RTSI) or list" : null),
+    run: (q) => getIndex(q.code === undefined ? ["IMOEX"] : parseIndexCodes(q.code)) },
+  "/moex/movers": { op: "moex-movers", required: [],
+    validate: (q) => (!isNum(q, "limit", MOVERS_LIMIT) ? "limit must be a number" : parseFloatParam(q.min_value, MIN_VALUE) === null ? "min_value must be a non-negative number (RUB)" : null),
+    run: (q) => getMovers({ limit: parseNumParam(q.limit, MOVERS_LIMIT), minValue: parseFloatParam(q.min_value, MIN_VALUE) }) },
+  "/ru/fuel": { op: "ru-fuel", required: [], validate: (q) => (isNum(q, "weeks", WEEKS_OPT) ? null : "weeks must be a number (0-52)"),
+    run: (q) => getFuel({ weeks: parseNumParam(q.weeks, WEEKS_OPT) }) },
+  "/tg/channel/latest": { op: "tg-latest", required: ["channel"],
+    validate: (q) => (normalizeChannel(q.channel) === null ? "channel is required: a public channel username (5-32 letters/digits/_), e.g. markettwits"
+      : !isNum(q, "limit", TG_LIMIT) ? "limit must be a number" : null),
+    run: (q) => channelLatest(normalizeChannel(q.channel), { limit: parseNumParam(q.limit, TG_LIMIT) }) },
+  "/tg/search": { op: "tg-search", required: ["q", "channels"],
+    validate: (q) => (parseQ(q.q) === null ? "q is required (1-100 characters)"
+      : parseChannelList(q.channels) === null ? "channels is required: 1-5 comma-separated public channel usernames" : !isNum(q, "limit", TG_LIMIT) ? "limit must be a number" : null),
+    run: (q) => channelSearch(parseQ(q.q), parseChannelList(q.channels), { limit: parseNumParam(q.limit, TG_LIMIT) }) },
+};
+// Validate only what is present; required params may be absent when no payment is attached (-> 402 challenge).
+function dataValidate(spec, q, { allowMissing }) {
+  const missing = spec.required.filter((k) => q[k] === undefined);
+  if (missing.length && !allowMissing) return spec.validate(q);
+  const filled = { ...q }; // stand-ins for absent required params so validate() checks the others
+  for (const k of missing) filled[k] = { ticker: "SBER", channel: "markettwits", q: "x", channels: "markettwits" }[k];
+  return spec.validate(filled);
+}
+async function runDataOp(spec, q) {
+  const err = dataValidate(spec, q, { allowMissing: false });
+  if (err) return [400, { error: err }];
+  try { return [200, await spec.run(q)]; } catch (e) {
+    if (e.status === 404) return [404, { error: "not_found", detail: e.detail || e.message }];
+    console.error(`[data] ${spec.op} failed:`, e.detail || e.message, JSON.stringify(e.attempts || []));
+    return [502, { error: "upstream_unavailable", detail: e.detail || e.message, ...(e.attempts?.length ? { attempts: e.attempts } : {}) }];
+  }
+}
+for (const [path, spec] of Object.entries(DATA_OPS)) app.get(path, (req, res, next) => {
+  const err = dataValidate(spec, req.query, { allowMissing: !hasPayment(req) });
+  return err ? res.status(400).json({ error: err }) : next();
+});
 // /product/info: invalid/foreign url -> 400 before payment; missing url without payment -> 402 (x402scan probes).
 app.get("/product/info", (req, res, next) => {
   const present = req.query.url !== undefined;
@@ -779,6 +1001,8 @@ app.get("/admin/product-probe", async (req, res) => {
   if (!INGEST_TOKEN) return res.status(404).json({ error: "disabled" });
   if (!tokenOk(req.get("authorization"))) return res.status(401).json({ error: "unauthorized" });
   const t = Date.now(), op = String(req.query.op || "info");
+  const dataSpec = Object.values(DATA_OPS).find((d) => d.op === op);
+  if (dataSpec) { const [status, body] = await runDataOp(dataSpec, req.query); return res.json({ ok: status === 200, op, status, ms: Date.now() - t, body }); }
   if (op.startsWith("news-") && NEWS_OPS[op.slice(5)]) { const [status, body] = NEWS_OPS[op.slice(5)](req.query); return res.json({ ok: status === 200, op, status, ms: Date.now() - t, body }); }
   if (PRODUCT_OPS[op]) { const [status, body] = await PRODUCT_OPS[op](req.query); return res.json({ ok: status === 200, op, status, ms: Date.now() - t, body }); }
   const p = parseProductUrl(req.query.url);
@@ -947,6 +1171,8 @@ const NEWS_OPS = {
   },
 };
 for (const op of Object.keys(NEWS_OPS)) app.get(`/news/${op}`, (req, res) => { const [status, body] = NEWS_OPS[op](req.query); res.status(status).json(body); });
+
+for (const [path, spec] of Object.entries(DATA_OPS)) app.get(path, async (req, res) => { const [status, body] = await runDataOp(spec, req.query); res.status(status).json(body); });
 
 app.get("/product/info", async (req, res) => {
   const p = parseProductUrl(req.query.url);
