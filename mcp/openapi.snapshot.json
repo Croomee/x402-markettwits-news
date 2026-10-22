@@ -1,0 +1,1275 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "MarketTwits News (English) — x402",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/news/latest": {
+      "get": {
+        "operationId": "getLatestNews",
+        "summary": "Latest translated MarketTwits news (newest first)",
+        "description": "Latest translated MarketTwits news (newest first), limit 1-50",
+        "tags": [
+          "news"
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "required": false,
+            "description": "Number of items (newest first)",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20
+            }
+          }
+        ],
+        "x-payment-info": {
+          "price": {
+            "mode": "fixed",
+            "currency": "USD",
+            "amount": "0.003"
+          },
+          "protocols": [
+            {
+              "x402": {
+                "network": "eip155:8453",
+                "scheme": "exact",
+                "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2",
+                "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                "amount": "3000"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "/news/important": {
+      "get": {
+        "operationId": "getImportantNews",
+        "summary": "High-importance news only (newest first)",
+        "description": "Only importance=high MarketTwits news (newest first), limit 1-50",
+        "tags": [
+          "news"
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "required": false,
+            "description": "Number of items (newest first)",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20
+            }
+          }
+        ],
+        "x-payment-info": {
+          "price": {
+            "mode": "fixed",
+            "currency": "USD",
+            "amount": "0.003"
+          },
+          "protocols": [
+            {
+              "x402": {
+                "network": "eip155:8453",
+                "scheme": "exact",
+                "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2",
+                "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                "amount": "3000"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "/news/search": {
+      "get": {
+        "operationId": "searchNews",
+        "summary": "Keyword search in translated news (newest first)",
+        "description": "Case-insensitive keyword search in translated MarketTwits news (all words must match), limit 1-50",
+        "tags": [
+          "news"
+        ],
+        "parameters": [
+          {
+            "name": "q",
+            "required": true,
+            "description": "Keywords (case-insensitive). Several words = all must match. Hashtags match with or without '#', e.g. 'oil', '#Fed rates'.",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "description": "Number of items (newest first)",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20
+            }
+          }
+        ],
+        "x-payment-info": {
+          "price": {
+            "mode": "fixed",
+            "currency": "USD",
+            "amount": "0.003"
+          },
+          "protocols": [
+            {
+              "x402": {
+                "network": "eip155:8453",
+                "scheme": "exact",
+                "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2",
+                "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                "amount": "3000"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "/news/alerts/check": {
+      "get": {
+        "operationId": "checkNewsAlert",
+        "summary": "Keyword alert check: how many matching items in the last N hours",
+        "description": "Count of news matching q (same matching as /news/search) published in the last N hours (1-168, default 24), plus the 5 most recent",
+        "tags": [
+          "news"
+        ],
+        "parameters": [
+          {
+            "name": "q",
+            "required": true,
+            "description": "Keywords (case-insensitive). Several words = all must match. Hashtags match with or without '#', e.g. 'oil', '#Fed rates'.",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            }
+          },
+          {
+            "name": "hours",
+            "required": false,
+            "description": "Look-back window in hours (default 24, clamped to 1-168)",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 168,
+              "default": 24
+            }
+          }
+        ],
+        "x-payment-info": {
+          "price": {
+            "mode": "fixed",
+            "currency": "USD",
+            "amount": "0.004"
+          },
+          "protocols": [
+            {
+              "x402": {
+                "network": "eip155:8453",
+                "scheme": "exact",
+                "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2",
+                "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                "amount": "4000"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "/news/summary": {
+      "get": {
+        "operationId": "summarizeNews",
+        "summary": "Short extractive English summary of the latest news on a keyword",
+        "description": "3-5 sentence extractive summary of the latest news matching q (limit 1-50, default 10): lead sentence + de-duplicated headlines, high-importance first",
+        "tags": [
+          "news"
+        ],
+        "parameters": [
+          {
+            "name": "q",
+            "required": true,
+            "description": "Keywords (case-insensitive). Several words = all must match. Hashtags match with or without '#', e.g. 'oil', '#Fed rates'.",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "description": "Number of latest matching items to summarize (default 10, max 50)",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50,
+              "default": 10
+            }
+          }
+        ],
+        "x-payment-info": {
+          "price": {
+            "mode": "fixed",
+            "currency": "USD",
+            "amount": "0.008"
+          },
+          "protocols": [
+            {
+              "x402": {
+                "network": "eip155:8453",
+                "scheme": "exact",
+                "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2",
+                "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                "amount": "8000"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "/news/top-topics": {
+      "get": {
+        "operationId": "getTopTopics",
+        "summary": "Top 5 keywords/hashtags in high-importance news of the last N hours",
+        "description": "Top 5 topics (hashtags, names, keywords; counted once per item) across high-importance news of the last N hours (1-72, default 6)",
+        "tags": [
+          "news"
+        ],
+        "parameters": [
+          {
+            "name": "hours",
+            "required": false,
+            "description": "Look-back window in hours (default 6, clamped to 1-72)",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 72,
+              "default": 6
+            }
+          }
+        ],
+        "x-payment-info": {
+          "price": {
+            "mode": "fixed",
+            "currency": "USD",
+            "amount": "0.005"
+          },
+          "protocols": [
+            {
+              "x402": {
+                "network": "eip155:8453",
+                "scheme": "exact",
+                "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2",
+                "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                "amount": "5000"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "/news/summary/recent": {
+      "get": {
+        "operationId": "summarizeRecentNews",
+        "summary": "Extractive English summary of news on a keyword from the last N hours",
+        "description": "3-5 sentence extractive summary of news matching q published in the last N hours (1-168, default 12; up to 50 items), with high_count. Use for 'what happened with X today'.",
+        "tags": [
+          "news"
+        ],
+        "parameters": [
+          {
+            "name": "q",
+            "required": true,
+            "description": "Keywords (case-insensitive). Several words = all must match. Hashtags match with or without '#', e.g. 'oil', '#Fed rates'.",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            }
+          },
+          {
+            "name": "hours",
+            "required": false,
+            "description": "Look-back window in hours (default 12, clamped to 1-168)",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 168,
+              "default": 12
+            }
+          }
+        ],
+        "x-payment-info": {
+          "price": {
+            "mode": "fixed",
+            "currency": "USD",
+            "amount": "0.007"
+          },
+          "protocols": [
+            {
+              "x402": {
+                "network": "eip155:8453",
+                "scheme": "exact",
+                "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2",
+                "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                "amount": "7000"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "/news/alerts/new": {
+      "get": {
+        "operationId": "checkNewHighAlert",
+        "summary": "Is there new HIGH-importance news on a keyword in the last N hours?",
+        "description": "Checks only importance=high news matching q in the last N hours (1-168, default 6): has_new, count and the latest item. Cheap poll for market-moving alerts on a topic/ticker.",
+        "tags": [
+          "news"
+        ],
+        "parameters": [
+          {
+            "name": "q",
+            "required": true,
+            "description": "Keywords (case-insensitive). Several words = all must match. Hashtags match with or without '#', e.g. 'oil', '#Fed rates'.",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            }
+          },
+          {
+            "name": "hours",
+            "required": false,
+            "description": "Look-back window in hours (default 6, clamped to 1-168)",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 168,
+              "default": 6
+            }
+          }
+        ],
+        "x-payment-info": {
+          "price": {
+            "mode": "fixed",
+            "currency": "USD",
+            "amount": "0.005"
+          },
+          "protocols": [
+            {
+              "x402": {
+                "network": "eip155:8453",
+                "scheme": "exact",
+                "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2",
+                "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                "amount": "5000"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "/news/topics/trending": {
+      "get": {
+        "operationId": "getTrendingTopics",
+        "summary": "Trending topics in high-importance news with change vs. the previous window",
+        "description": "Top 5 topics (hashtags, names, keywords; counted once per item) in high-importance news of the last N hours (1-72, default 6), each with prev_count in the previous equal-length window, change = count - prev_count, and latest_id/latest_source_url",
+        "tags": [
+          "news"
+        ],
+        "parameters": [
+          {
+            "name": "hours",
+            "required": false,
+            "description": "Look-back window in hours (default 6, clamped to 1-72)",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 72,
+              "default": 6
+            }
+          }
+        ],
+        "x-payment-info": {
+          "price": {
+            "mode": "fixed",
+            "currency": "USD",
+            "amount": "0.004"
+          },
+          "protocols": [
+            {
+              "x402": {
+                "network": "eip155:8453",
+                "scheme": "exact",
+                "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2",
+                "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                "amount": "4000"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "/news/since": {
+      "get": {
+        "operationId": "getNewsSince",
+        "summary": "Incremental feed: items newer than the id you already have (cursor polling)",
+        "description": "All stored items with id > id (oldest first, up to limit 1-100, default 50) plus next_id/has_more for the next call. The cheapest way for a bot to poll without duplicates: keep next_id and pass it back.",
+        "tags": [
+          "news"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "description": "Last item id you already have (0 = from the oldest stored item). Items with a larger id are returned, oldest first.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]{1,15}$"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "description": "Max items per page (default 50, max 100)",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          }
+        ],
+        "x-payment-info": {
+          "price": {
+            "mode": "fixed",
+            "currency": "USD",
+            "amount": "0.002"
+          },
+          "protocols": [
+            {
+              "x402": {
+                "network": "eip155:8453",
+                "scheme": "exact",
+                "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2",
+                "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                "amount": "2000"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "/news/movers": {
+      "get": {
+        "operationId": "getNewsMovers",
+        "summary": "Top gainers/losers reported in the news ('#TICKER = ±X%')",
+        "description": "Parses '#TICKER [Name] = ±X%' price-move mentions (stocks, indices, crypto; RU/US/... from the flag) in news of the last N hours (1-72, default 6), newest mention per ticker, |move| >= min_pct (default 0): top 10 gainers and top 10 losers with the source item.",
+        "tags": [
+          "news"
+        ],
+        "parameters": [
+          {
+            "name": "hours",
+            "required": false,
+            "description": "Look-back window in hours (default 6, clamped to 1-72)",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 72,
+              "default": 6
+            }
+          },
+          {
+            "name": "min_pct",
+            "required": false,
+            "description": "Minimum absolute move in percent (default 0, max 100), e.g. 3 or 2.5",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]+([.,][0-9]+)?$",
+              "default": "0"
+            }
+          }
+        ],
+        "x-payment-info": {
+          "price": {
+            "mode": "fixed",
+            "currency": "USD",
+            "amount": "0.005"
+          },
+          "protocols": [
+            {
+              "x402": {
+                "network": "eip155:8453",
+                "scheme": "exact",
+                "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2",
+                "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                "amount": "5000"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "/news/country": {
+      "get": {
+        "operationId": "getCountryNews",
+        "summary": "News about one country (flag emoji + country keywords) with counts and top topics",
+        "description": "Items of the last N hours (1-168, default 24; importance all|high|medium|low) that carry the country's flag emoji or mention it (e.g. RU: Russia/Kremlin/Bank of Russia/MOEX; US: USA/Fed/White House): count, high_count, share_of_window, top_topics and the 10 latest headlines.",
+        "tags": [
+          "news"
+        ],
+        "parameters": [
+          {
+            "name": "code",
+            "required": true,
+            "description": "ISO 3166-1 alpha-2 country code (e.g. US, RU, CN, UA, IR, GB; UK = GB; EU accepted)",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z]{2}$"
+            }
+          },
+          {
+            "name": "hours",
+            "required": false,
+            "description": "Look-back window in hours (default 24, clamped to 1-168)",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 168,
+              "default": 24
+            }
+          },
+          {
+            "name": "importance",
+            "required": false,
+            "description": "Importance filter (default all)",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "all",
+                "high",
+                "medium",
+                "low"
+              ],
+              "default": "all"
+            }
+          }
+        ],
+        "x-payment-info": {
+          "price": {
+            "mode": "fixed",
+            "currency": "USD",
+            "amount": "0.004"
+          },
+          "protocols": [
+            {
+              "x402": {
+                "network": "eip155:8453",
+                "scheme": "exact",
+                "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2",
+                "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                "amount": "4000"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "/news/data-surprises": {
+      "get": {
+        "operationId": "getDataSurprises",
+        "summary": "Macro data and earnings vs. expectations: actual, expected, previous, surprise",
+        "description": "Parses releases like 'US Pending Home Sales (Sep) = -7.3% m/m (exp. -0.5% / prev. +0.3%)' and earnings lines like '3Q REV. $14.58B, EST. $12.87B' from news of the last N hours (1-168, default 24; optional q filter): indicator, actual, expected, previous, unit, surprise (actual - expected), surprise_pct and direction above/below/inline.",
+        "tags": [
+          "news"
+        ],
+        "parameters": [
+          {
+            "name": "hours",
+            "required": false,
+            "description": "Look-back window in hours (default 24, clamped to 1-168)",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 168,
+              "default": 24
+            }
+          },
+          {
+            "name": "q",
+            "required": false,
+            "description": "Optional keyword filter (same matching as /news/search)",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            }
+          }
+        ],
+        "x-payment-info": {
+          "price": {
+            "mode": "fixed",
+            "currency": "USD",
+            "amount": "0.006"
+          },
+          "protocols": [
+            {
+              "x402": {
+                "network": "eip155:8453",
+                "scheme": "exact",
+                "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2",
+                "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                "amount": "6000"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "/news/sentiment": {
+      "get": {
+        "operationId": "getNewsSentiment",
+        "summary": "Heuristic bullish/bearish tone of news on a keyword (lexicon, not a model)",
+        "description": "Scores each item matching q in the last N hours (1-168, default 24) with a keyword/emoji lexicon (rise/beat/upgrade vs. fall/miss/sanctions, ⬆️/⬇️) plus explicit '= ±X%' moves, and returns bullish/bearish/neutral counts, score = (bullish - bearish)/count in [-1, 1], a label and examples. method is always 'heuristic'.",
+        "tags": [
+          "news"
+        ],
+        "parameters": [
+          {
+            "name": "q",
+            "required": true,
+            "description": "Keywords (case-insensitive). Several words = all must match. Hashtags match with or without '#', e.g. 'oil', '#Fed rates'.",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            }
+          },
+          {
+            "name": "hours",
+            "required": false,
+            "description": "Look-back window in hours (default 24, clamped to 1-168)",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 168,
+              "default": 24
+            }
+          }
+        ],
+        "x-payment-info": {
+          "price": {
+            "mode": "fixed",
+            "currency": "USD",
+            "amount": "0.005"
+          },
+          "protocols": [
+            {
+              "x402": {
+                "network": "eip155:8453",
+                "scheme": "exact",
+                "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2",
+                "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                "amount": "5000"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "/news/digest": {
+      "get": {
+        "operationId": "getNewsDigest",
+        "summary": "Sectioned briefing: central banks, macro, energy, equities, crypto, geopolitics",
+        "description": "Groups news of the last N hours (1-48, default 24) into central_banks, macro, energy, equities, crypto and geopolitics by keyword rules (an item may appear in several), each with count, high_count and up to 5 headlines (high first, then newest), plus top_topics of high items.",
+        "tags": [
+          "news"
+        ],
+        "parameters": [
+          {
+            "name": "hours",
+            "required": false,
+            "description": "Look-back window in hours (default 24, clamped to 1-48)",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 48,
+              "default": 24
+            }
+          }
+        ],
+        "x-payment-info": {
+          "price": {
+            "mode": "fixed",
+            "currency": "USD",
+            "amount": "0.01"
+          },
+          "protocols": [
+            {
+              "x402": {
+                "network": "eip155:8453",
+                "scheme": "exact",
+                "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2",
+                "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                "amount": "10000"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "/ru/fx": {
+      "get": {
+        "operationId": "getCbrFxRates",
+        "summary": "Official Bank of Russia FX rates (RUB) with day-over-day change",
+        "description": "CBR official exchange rates from cbr.ru XML_daily.asp for a date (default: the latest set) and optional currency codes: per currency nominal, value (RUB per nominal), per_unit (RUB per 1 unit), previous set's per_unit, change and change_pct. Cached 30 min (past dates 7 days).",
+        "tags": [
+          "ru-data"
+        ],
+        "parameters": [
+          {
+            "name": "date",
+            "required": false,
+            "description": "Rates date YYYY-MM-DD (default: latest set by CBR; 1992-07-01 .. tomorrow)",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "codes",
+            "required": false,
+            "description": "Comma-separated ISO currency codes (default: all ~55 CBR currencies), e.g. USD,EUR,CNY",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z]{3}(,[A-Za-z]{3}){0,29}$"
+            }
+          }
+        ],
+        "x-payment-info": {
+          "price": {
+            "mode": "fixed",
+            "currency": "USD",
+            "amount": "0.0015"
+          },
+          "protocols": [
+            {
+              "x402": {
+                "network": "eip155:8453",
+                "scheme": "exact",
+                "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2",
+                "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                "amount": "1500"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "/ru/key-rate": {
+      "get": {
+        "operationId": "getCbrKeyRate",
+        "summary": "Bank of Russia key rate: current level, since when, and recent changes",
+        "description": "Current CBR key rate (% p.a.) from the cbr.ru DailyInfo web service (KeyRateXML; the hd_base/KeyRate page as fallback): rate, as_of, effective_since, previous_rate, last_change_bp and every change in the last `months` (default 24) newest first, plus min/max in the window. Cached 3 h.",
+        "tags": [
+          "ru-data"
+        ],
+        "parameters": [
+          {
+            "name": "months",
+            "required": false,
+            "description": "History window in months for `changes` (default 24, max 120)",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 120,
+              "default": 24
+            }
+          }
+        ],
+        "x-payment-info": {
+          "price": {
+            "mode": "fixed",
+            "currency": "USD",
+            "amount": "0.0015"
+          },
+          "protocols": [
+            {
+              "x402": {
+                "network": "eip155:8453",
+                "scheme": "exact",
+                "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2",
+                "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                "amount": "1500"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "/moex/quote": {
+      "get": {
+        "operationId": "getMoexQuote",
+        "summary": "Moscow Exchange stock quote (delayed ~15 min): price, change, volume, bid/offer",
+        "description": "One MOEX shares-market ticker from MOEX ISS (main board TQBR when listed): price (last trade, or previous close before the session's first trade), change/change_pct vs previous close, open/high/low, bid/offer, volume, value_rub, market cap, trading status. Data is delayed ~15 minutes (delayed: true). Unknown ticker -> 404 (not settled).",
+        "tags": [
+          "ru-data"
+        ],
+        "parameters": [
+          {
+            "name": "ticker",
+            "required": true,
+            "description": "MOEX ticker (SECID) on the shares market, e.g. SBER, GAZP, LKOH, YDEX, T",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,11}$"
+            }
+          }
+        ],
+        "x-payment-info": {
+          "price": {
+            "mode": "fixed",
+            "currency": "USD",
+            "amount": "0.003"
+          },
+          "protocols": [
+            {
+              "x402": {
+                "network": "eip155:8453",
+                "scheme": "exact",
+                "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2",
+                "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                "amount": "3000"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "/moex/index": {
+      "get": {
+        "operationId": "getMoexIndex",
+        "summary": "MOEX index values (IMOEX, RTSI, sector indices) or the index catalogue",
+        "description": "Index level, change/change_pct vs previous close, open/high/low, month/year change, annual high/low and traded value for up to 5 codes (default IMOEX), or code=list for the catalogue of MOEX stock indices (SNDX board + RTS*). Delayed ~15 minutes. Unknown codes -> 404 (not settled).",
+        "tags": [
+          "ru-data"
+        ],
+        "parameters": [
+          {
+            "name": "code",
+            "required": false,
+            "description": "Index code(s), up to 5 comma-separated (default IMOEX; e.g. RTSI, MOEXBMI, MOEXOG), or `list` for the catalogue of stock indices",
+            "schema": {
+              "type": "string",
+              "pattern": "^([A-Za-z0-9]{2,16}(,[A-Za-z0-9]{2,16}){0,4}|list)$",
+              "default": "IMOEX"
+            }
+          }
+        ],
+        "x-payment-info": {
+          "price": {
+            "mode": "fixed",
+            "currency": "USD",
+            "amount": "0.003"
+          },
+          "protocols": [
+            {
+              "x402": {
+                "network": "eip155:8453",
+                "scheme": "exact",
+                "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2",
+                "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                "amount": "3000"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "/moex/movers": {
+      "get": {
+        "operationId": "getMoexMovers",
+        "summary": "Top gainers and losers on the Moscow Exchange main board (TQBR), with market breadth",
+        "description": "Ranks TQBR shares by change vs previous close (turnover >= min_value RUB, default 5 mln): top `limit` gainers and losers (default 10, max 50), advancers/decliners/unchanged. Before the session's first trades (mode previous_session) it ranks the last completed session from ISS history. Delayed ~15 minutes.",
+        "tags": [
+          "ru-data"
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "required": false,
+            "description": "Gainers and losers to return (each side, default 10, max 50)",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50,
+              "default": 10
+            }
+          },
+          {
+            "name": "min_value",
+            "required": false,
+            "description": "Minimum turnover in RUB to count a stock (default 5000000; filters illiquid names)",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]+([.,][0-9]+)?$",
+              "default": "5000000"
+            }
+          }
+        ],
+        "x-payment-info": {
+          "price": {
+            "mode": "fixed",
+            "currency": "USD",
+            "amount": "0.004"
+          },
+          "protocols": [
+            {
+              "x402": {
+                "network": "eip155:8453",
+                "scheme": "exact",
+                "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2",
+                "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                "amount": "4000"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "/ru/fuel": {
+      "get": {
+        "operationId": "getRuFuelPrices",
+        "summary": "Russian retail fuel prices (AI-92/95/98, diesel) — Rosstat weekly averages",
+        "description": "Average retail pump prices across Russia from Rosstat's weekly release (rosstat.gov.ru nedel_sred_cen.xlsx): price (RUB/l), as_of, week-over-week change, 4-week and year-to-date change and `weeks` of history per fuel. Rosstat publishes weekly (usually Wednesday, prices as of Monday); cached 6 h, a stale copy (stale: true) is served for up to 14 days if Rosstat is unreachable.",
+        "tags": [
+          "ru-data"
+        ],
+        "parameters": [
+          {
+            "name": "weeks",
+            "required": false,
+            "description": "Weekly history points to include per fuel (0-52, default 4)",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 52,
+              "default": 4
+            }
+          }
+        ],
+        "x-payment-info": {
+          "price": {
+            "mode": "fixed",
+            "currency": "USD",
+            "amount": "0.003"
+          },
+          "protocols": [
+            {
+              "x402": {
+                "network": "eip155:8453",
+                "scheme": "exact",
+                "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2",
+                "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                "amount": "3000"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "/tg/channel/latest": {
+      "get": {
+        "operationId": "getTelegramChannelLatest",
+        "summary": "Latest posts of a public Telegram channel (text, date, views, link)",
+        "description": "Reads the public web preview t.me/s/<channel> (no login): newest `limit` posts (default 20, max 50) with id, date, text (HTML stripped, emoji kept), views, link, media types and channel title/subscribers. Channels without a public preview or that do not exist -> 404 (not settled). Cached 2 min.",
+        "tags": [
+          "telegram"
+        ],
+        "parameters": [
+          {
+            "name": "channel",
+            "required": true,
+            "description": "Public Telegram channel username (5-32 chars; '@name' or a t.me link also accepted), e.g. markettwits",
+            "schema": {
+              "type": "string",
+              "pattern": "^@?[A-Za-z][A-Za-z0-9_]{3,31}$"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "description": "Messages to return (default 20, max 50)",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20
+            }
+          }
+        ],
+        "x-payment-info": {
+          "price": {
+            "mode": "fixed",
+            "currency": "USD",
+            "amount": "0.004"
+          },
+          "protocols": [
+            {
+              "x402": {
+                "network": "eip155:8453",
+                "scheme": "exact",
+                "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2",
+                "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                "amount": "4000"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "/tg/search": {
+      "get": {
+        "operationId": "searchTelegramChannels",
+        "summary": "Search up to 5 public Telegram channels for a keyword",
+        "description": "Runs Telegram's own channel search (t.me/s/<channel>?q=) on 1-5 public channels, merges the matches newest first (up to `limit`, default 20) with per-channel counts/errors. 404 when no channel exists, 502 when all fail; partial failures are reported in per_channel.",
+        "tags": [
+          "telegram"
+        ],
+        "parameters": [
+          {
+            "name": "q",
+            "required": true,
+            "description": "Keywords (case-insensitive). Several words = all must match. Hashtags match with or without '#', e.g. 'oil', '#Fed rates'.",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            }
+          },
+          {
+            "name": "channels",
+            "required": true,
+            "description": "1-5 comma-separated public channel usernames, e.g. markettwits,rbc_news",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "description": "Messages to return (default 20, max 50)",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20
+            }
+          }
+        ],
+        "x-payment-info": {
+          "price": {
+            "mode": "fixed",
+            "currency": "USD",
+            "amount": "0.006"
+          },
+          "protocols": [
+            {
+              "x402": {
+                "network": "eip155:8453",
+                "scheme": "exact",
+                "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2",
+                "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                "amount": "6000"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "/product/info": {
+      "get": {
+        "operationId": "getProductInfo",
+        "summary": "Wildberries / Ozon product card: title, price (RUB), rating, reviews, stock",
+        "description": "Live product data for a Wildberries (wildberries.ru, wb.ru) or Ozon (ozon.ru) product URL: title, current price in RUB (original_amount = list price before discount when known), rating, reviews_count and availability. Cached 10 min per product. If the marketplace blocks or fails, returns 502 upstream_unavailable and the payment is NOT settled. Can take up to ~40s when the live page has to be rendered.",
+        "tags": [
+          "product"
+        ],
+        "parameters": [
+          {
+            "name": "url",
+            "required": true,
+            "description": "Product page URL: https://www.wildberries.ru/catalog/<id>/detail.aspx (also wb.ru, *.wildberries.ru) or https://www.ozon.ru/product/<slug>-<id>/ (also *.ozon.ru)",
+            "schema": {
+              "type": "string",
+              "minLength": 10,
+              "maxLength": 2000
+            }
+          }
+        ],
+        "x-payment-info": {
+          "price": {
+            "mode": "fixed",
+            "currency": "USD",
+            "amount": "0.004"
+          },
+          "protocols": [
+            {
+              "x402": {
+                "network": "eip155:8453",
+                "scheme": "exact",
+                "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2",
+                "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                "amount": "4000"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "/product/compare": {
+      "get": {
+        "operationId": "compareProducts",
+        "summary": "Compare 2-5 Wildberries products: prices, cheapest, price spread, stock",
+        "description": "Fetches 2-5 product URLs (urls=comma-separated, or repeated url=) with the same live chain as /product/info and returns per-item title/price/original_price/in_stock/rating/reviews_count, the cheapest and most expensive item, price_diff (abs RUB and percent of the cheapest), in_stock_count and all_in_stock. Items that fail carry error/detail; returns 502 (payment not settled) only if fewer than 2 items returned a price.",
+        "tags": [
+          "product"
+        ],
+        "parameters": [
+          {
+            "name": "urls",
+            "required": true,
+            "description": "2-5 comma-separated product URLs (Wildberries; Ozon is accepted but currently blocked by its anti-bot). Alternatively repeat url= instead.",
+            "schema": {
+              "type": "string",
+              "minLength": 20,
+              "maxLength": 10000
+            }
+          }
+        ],
+        "x-payment-info": {
+          "price": {
+            "mode": "fixed",
+            "currency": "USD",
+            "amount": "0.006"
+          },
+          "protocols": [
+            {
+              "x402": {
+                "network": "eip155:8453",
+                "scheme": "exact",
+                "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2",
+                "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                "amount": "6000"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "/product/monitor": {
+      "get": {
+        "operationId": "monitorProductPrice",
+        "summary": "Price-target check for one product: is the current price at or below target_price?",
+        "description": "Fetches one Wildberries/Ozon product (same live chain as /product/info) and compares it with target_price (RUB): below_target (current <= target and not out of stock), current_price, diff_abs/diff_percent, in_stock, the full product object and checked_at. Use it as a paid poll for price alerts. If the product is out of stock with no price it returns 200 with below_target false, current_price null, in_stock false and a note; if no product data can be fetched at all it returns 502 and the payment is not settled.",
+        "tags": [
+          "product"
+        ],
+        "parameters": [
+          {
+            "name": "url",
+            "required": true,
+            "description": "Product page URL: https://www.wildberries.ru/catalog/<id>/detail.aspx (also wb.ru, *.wildberries.ru) or https://www.ozon.ru/product/<slug>-<id>/ (also *.ozon.ru)",
+            "schema": {
+              "type": "string",
+              "minLength": 10,
+              "maxLength": 2000
+            }
+          },
+          {
+            "name": "target_price",
+            "required": true,
+            "description": "Target price in RUB, a positive number (e.g. 1500 or 1499.90)",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]+([.,][0-9]+)?$"
+            }
+          }
+        ],
+        "x-payment-info": {
+          "price": {
+            "mode": "fixed",
+            "currency": "USD",
+            "amount": "0.005"
+          },
+          "protocols": [
+            {
+              "x402": {
+                "network": "eip155:8453",
+                "scheme": "exact",
+                "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2",
+                "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                "amount": "5000"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "/product/history": {
+      "get": {
+        "operationId": "getProductPriceHistory",
+        "summary": "Wildberries price history: weekly CDN points + observed + live price, min/max/avg, 30-day change",
+        "description": "Price history for a Wildberries product: weekly points from WB's public price-history CDN (weekly_cdn), prices this service observed on earlier lookups (observed; in-memory, reset on restart), and the current live price (live). Returns points (oldest first), current, stats min/max/avg, change_30d (vs. the latest point at least 30 days old) and history_limited:true with a note when only the current price exists. Ozon has no public history (only live, currently blocked). 502 (not settled) only when no price at all is available.",
+        "tags": [
+          "product"
+        ],
+        "parameters": [
+          {
+            "name": "url",
+            "required": true,
+            "description": "Product page URL: https://www.wildberries.ru/catalog/<id>/detail.aspx (also wb.ru, *.wildberries.ru) or https://www.ozon.ru/product/<slug>-<id>/ (also *.ozon.ru)",
+            "schema": {
+              "type": "string",
+              "minLength": 10,
+              "maxLength": 2000
+            }
+          }
+        ],
+        "x-payment-info": {
+          "price": {
+            "mode": "fixed",
+            "currency": "USD",
+            "amount": "0.004"
+          },
+          "protocols": [
+            {
+              "x402": {
+                "network": "eip155:8453",
+                "scheme": "exact",
+                "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2",
+                "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                "amount": "4000"
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,7 @@
+test/
+scripts/
+Dockerfile
+.dockerignore
+smithery.yaml
+glama.json
+server.json

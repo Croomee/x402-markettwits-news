@@ -1,0 +1,41 @@
+{
+  "name": "x402-markettwits-mcp",
+  "version": "0.1.0",
+  "description": "MCP server for the x402-paid MarketTwits news + Russian market data API (CBR, MOEX, Rosstat fuel, Telegram, WB products). Auto-pays per call in USDC on Base.",
+  "mcpName": "io.github.Croomee/x402-markettwits-mcp",
+  "type": "module",
+  "main": "src/server.mjs",
+  "bin": {
+    "x402-markettwits-mcp": "src/index.mjs"
+  },
+  "files": [
+    "src/",
+    "openapi.snapshot.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "start": "node src/index.mjs",
+    "test": "node --test test/",
+    "gen": "node scripts/gen-snapshot.mjs"
+  },
+  "keywords": ["mcp", "model-context-protocol", "x402", "usdc", "base", "news", "markettwits", "moex", "cbr", "russia", "telegram", "finance"],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Croomee/x402-markettwits-news.git",
+    "directory": "mcp"
+  },
+  "homepage": "https://github.com/Croomee/x402-markettwits-news/tree/main/mcp#readme",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "@x402/core": "^2.28.0",
+    "@x402/evm": "^2.28.0",
+    "@x402/fetch": "^2.28.0",
+    "viem": "^2.57.8",
+    "zod": "^4.0.0"
+  }
+}

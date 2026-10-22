@@ -1,0 +1,248 @@
+{
+  "x402Version": 2,
+  "error": "Payment required",
+  "resource": {
+    "url": "https://x402-markettwits-news.onrender.com/ru/fx?codes=USD",
+    "description": "CBR official exchange rates from cbr.ru XML_daily.asp for a date (default: the latest set) and optional currency codes: per currency nominal, value (RUB per nominal), per_unit (RUB per 1 unit), previous set's per_unit, change and change_pct. Cached 30 min (past dates 7 days).",
+    "mimeType": "application/json"
+  },
+  "accepts": [
+    {
+      "scheme": "exact",
+      "network": "eip155:8453",
+      "amount": "1500",
+      "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2",
+      "maxTimeoutSeconds": 60,
+      "extra": {
+        "name": "USD Coin",
+        "version": "2"
+      }
+    }
+  ],
+  "extensions": {
+    "bazaar": {
+      "info": {
+        "input": {
+          "type": "http",
+          "queryParams": {
+            "codes": "USD,EUR,CNY"
+          },
+          "method": "GET"
+        },
+        "output": {
+          "type": "json",
+          "example": {
+            "source": "Bank of Russia (cbr.ru/scripts/XML_daily.asp)",
+            "base": "RUB",
+            "date": "2026-10-22",
+            "requested_date": null,
+            "previous_date": "2026-10-21",
+            "count": 2,
+            "rates": [
+              {
+                "code": "USD",
+                "name": "Доллар США",
+                "nominal": 1,
+                "value": 81.9739,
+                "per_unit": 81.9739,
+                "prev_per_unit": 82.8879,
+                "change": -0.914,
+                "change_pct": -1.103
+              },
+              {
+                "code": "CNY",
+                "name": "Юань",
+                "nominal": 1,
+                "value": 12.2806,
+                "per_unit": 12.2806,
+                "prev_per_unit": 12.3708,
+                "change": -0.0902,
+                "change_pct": -0.729
+              }
+            ],
+            "missing": [],
+            "note": "Official CBR rate",
+            "via": "direct",
+            "cached": false,
+            "fetched_at": "2026-10-22T03:51:31Z"
+          }
+        }
+      },
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "input": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "http"
+              },
+              "method": {
+                "type": "string",
+                "enum": [
+                  "GET"
+                ]
+              },
+              "queryParams": {
+                "type": "object",
+                "properties": {
+                  "date": {
+                    "type": "string",
+                    "format": "date",
+                    "description": "Rates date YYYY-MM-DD (default: latest set by CBR; 1992-07-01 .. tomorrow)"
+                  },
+                  "codes": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z]{3}(,[A-Za-z]{3}){0,29}$",
+                    "description": "Comma-separated ISO currency codes (default: all ~55 CBR currencies), e.g. USD,EUR,CNY"
+                  }
+                },
+                "required": []
+              }
+            },
+            "required": [
+              "type",
+              "method"
+            ],
+            "additionalProperties": false
+          },
+          "output": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string"
+              },
+              "example": {
+                "type": "object",
+                "required": [
+                  "base",
+                  "date",
+                  "count",
+                  "rates"
+                ],
+                "properties": {
+                  "source": {
+                    "type": "string"
+                  },
+                  "via": {
+                    "type": "string",
+                    "enum": [
+                      "direct",
+                      "proxy"
+                    ]
+                  },
+                  "cached": {
+                    "type": "boolean"
+                  },
+                  "stale": {
+                    "type": "boolean",
+                    "description": "true when the upstream failed and a recent cached copy was served"
+                  },
+                  "fetched_at": {
+                    "type": "string"
+                  },
+                  "base": {
+                    "type": "string",
+                    "enum": [
+                      "RUB"
+                    ]
+                  },
+                  "date": {
+                    "type": "string",
+                    "description": "Date the official rates are set for"
+                  },
+                  "requested_date": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "previous_date": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "count": {
+                    "type": "integer"
+                  },
+                  "rates": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "nominal",
+                        "value",
+                        "per_unit"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "nominal": {
+                          "type": "integer"
+                        },
+                        "value": {
+                          "type": "number",
+                          "description": "RUB per `nominal` units"
+                        },
+                        "per_unit": {
+                          "type": "number",
+                          "description": "RUB per 1 unit"
+                        },
+                        "prev_per_unit": {
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "change": {
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "change_pct": {
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        }
+                      }
+                    }
+                  },
+                  "missing": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Requested codes CBR does not quote"
+                  },
+                  "note": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        },
+        "required": [
+          "input"
+        ]
+      }
+    }
+  }
+}

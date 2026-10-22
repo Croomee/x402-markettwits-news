@@ -146,6 +146,71 @@ existing proxy/direct chain. 400-before-payment / 402 / settle-only-on-2xx are u
 Security: the parser is protected only by the bearer token over plain HTTP (Render has no static egress IPs to
 allow-list). Keep the token secret, rotate it with `--reset-token`, and put it behind HTTPS (e.g. Caddy) when possible.
 
+## MCP server (`mcp/`)
+`mcp/` is a separate, publish-ready npm package: **`x402-markettwits-mcp`**. It is a stdio MCP server with one tool
+per paid endpoint (27); the tools are generated from the live `/openapi.json` at startup, falling back to a bundled
+snapshot. Calls are auto-paid with `@x402/fetch` + `@x402/evm` from `X402_PRIVATE_KEY`, capped at
+`X402_MAX_PAYMENT_USD` (default $0.02) per call. See [mcp/README.md](mcp/README.md). It is not part of the Render build
+(the root `npm ci` ignores it).
+
+## Paid monitor (`scripts/paid-monitor.mjs`)
+Each run makes **one real paid call**, rotating hourly through cheap endpoints:
+- `/ru/fx` $0.0015
+- `/ru/key-rate` $0.0015
+- `/news/since` $0.002
+- `/moex/index` $0.003
+- `/tg/channel/latest` $0.004
+
+It checks:
+- HTTP 200
+- `PAYMENT-RESPONSE` with `success` and a tx hash
+- payTo is ours
+- a sane body (it also alerts if the news store is empty)
+- the tx receipt on Base
+- the wallet's USDC balance
+
+On failure it prints a JSON line and `ALERT …` on stderr, appends the line to `MONITOR_LOG`
+(default `~/.x402-monitor/paid-monitor.jsonl`), exits 1 and sends a Telegram message when `TG_BOT_TOKEN` + `TG_CHAT_ID`
+are set. It also sends a "recovered" message after a failure, and a low-balance warning at most once a day.
+`--dry-run` pays nothing: it checks `/health` and the 402 challenge (amount, payTo, network, Bazaar) of every group.
+Exit codes: 0 ok, 1 failure, 2 config error.
+
+```bash
+cd mcp && npm ci --omit=dev && cd ..          # the monitor uses the MCP package's x402 client
+node scripts/paid-monitor.mjs --dry-run
+X402_PRIVATE_KEY_FILE=~/.x402-monitor/key node scripts/paid-monitor.mjs [--group cbr-fx] [--no-telegram]
+```
+
+Hourly on a VPS (Beget) with a systemd timer (env file from `scripts/paid-monitor.env.example`, chmod 600):
+```ini
+# /etc/systemd/system/x402-monitor.service
+[Unit]
+Description=x402 paid monitor
+After=network-online.target
+[Service]
+Type=oneshot
+User=USER
+EnvironmentFile=/etc/x402-monitor.env
+ExecStart=/usr/bin/node /opt/x402-markettwits-news/scripts/paid-monitor.mjs
+
+# /etc/systemd/system/x402-monitor.timer
+[Unit]
+Description=x402 paid monitor, hourly
+[Timer]
+OnCalendar=hourly
+RandomizedDelaySec=120
+Persistent=true
+[Install]
+WantedBy=timers.target
+```
+`systemctl daemon-reload && systemctl enable --now x402-monitor.timer`; logs: `journalctl -u x402-monitor`.
+Or cron: `7 * * * * set -a; . /etc/x402-monitor.env; set +a; node /opt/x402-markettwits-news/scripts/paid-monitor.mjs >/dev/null 2>&1`.
+
+Cost: one paid call an hour is about 720 calls a month, averaging $0.0024, so about $1.7 of USDC a month moves from the hot wallet to our own
+payTo (net zero, but top up the hot wallet from payTo now and then). The real cost is the facilitator: the CDP x402 facilitator
+gives 1,000 free settlements a month, then $0.001 each, so $0–$0.72 a month depending on real customer volume. Buyers pay no gas
+(EIP-3009).
+
 ## Run locally
 ```bash
 npm ci

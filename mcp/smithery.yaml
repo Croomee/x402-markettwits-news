@@ -1,0 +1,32 @@
+# Smithery (stdio, built from ./Dockerfile). https://smithery.ai/docs/build/project-config
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    required:
+      - x402PrivateKey
+    properties:
+      x402PrivateKey:
+        type: string
+        description: Private key (0x + 64 hex) of a dedicated Base wallet holding a few USDC. Each tool call pays $0.0015-$0.01.
+      maxPaymentUsd:
+        type: number
+        default: 0.02
+        description: Per-call spend cap in USD.
+      baseUrl:
+        type: string
+        default: https://x402-markettwits-news.onrender.com
+        description: API base URL.
+  commandFunction: |-
+    (config) => ({
+      command: 'node',
+      args: ['src/index.mjs'],
+      env: {
+        X402_PRIVATE_KEY: config.x402PrivateKey,
+        X402_MAX_PAYMENT_USD: String(config.maxPaymentUsd ?? 0.02),
+        X402_BASE_URL: config.baseUrl || 'https://x402-markettwits-news.onrender.com'
+      }
+    })
+  exampleConfig:
+    x402PrivateKey: "0x<64 hex chars of a dedicated hot wallet>"
+    maxPaymentUsd: 0.02

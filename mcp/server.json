@@ -1,0 +1,27 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.Croomee/x402-markettwits-mcp",
+  "title": "MarketTwits news + Russian market data (x402)",
+  "description": "Pay-per-call market news, CBR/MOEX/Rosstat data and Telegram tools; auto-pays USDC on Base via x402",
+  "repository": {
+    "url": "https://github.com/Croomee/x402-markettwits-news",
+    "source": "github",
+    "subfolder": "mcp"
+  },
+  "websiteUrl": "https://x402-markettwits-news.onrender.com/openapi.json",
+  "version": "0.1.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "x402-markettwits-mcp",
+      "version": "0.1.0",
+      "transport": { "type": "stdio" },
+      "environmentVariables": [
+        { "name": "X402_PRIVATE_KEY", "description": "Private key (0x + 64 hex) of a dedicated Base wallet holding a few USDC; pays each call", "isRequired": true, "isSecret": true, "format": "string" },
+        { "name": "X402_MAX_PAYMENT_USD", "description": "Per-call spend cap in USD (default 0.02)", "isRequired": false, "isSecret": false, "format": "number", "default": "0.02" },
+        { "name": "X402_BASE_URL", "description": "API base URL", "isRequired": false, "isSecret": false, "format": "string", "default": "https://x402-markettwits-news.onrender.com" }
+      ]
+    }
+  ]
+}
