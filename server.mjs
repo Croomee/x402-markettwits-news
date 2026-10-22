@@ -1,5 +1,5 @@
 // x402-paid MarketTwits news API
-// Free:  GET /health, GET /news/sample
+// Free:  GET / (service index + price list), GET /health, GET /news/sample, GET /openapi.json
 // Paid:  GET /news/latest?limit=N, /news/important, /news/search?q=   (x402 v2, exact scheme, PRICE each)
 //        GET /news/alerts/check ($0.004), /news/summary ($0.008), /news/top-topics ($0.005)
 //        GET /news/summary/recent ($0.007), /news/alerts/new ($0.005), /news/topics/trending ($0.004)
@@ -811,12 +811,25 @@ app.get("/openapi.json", async (req, res) => {
         `out-of-stock without a price -> 200 below_target:false current_price:null. ` +
         `GET /product/history?url=URL ($0.004) - Wildberries weekly CDN price points + observed + live price, min/max/avg, change_30d, ` +
         `history_limited when only the current price exists. Wildberries works via a headless-browser parser; Ozon is currently blocked (502, not charged). ` +
-        `Free: GET /news/sample (one truncated item), GET /health.`,
+        `Free: GET / (service index with the full price list), GET /news/sample (one truncated item), GET /health.`,
       contact: { email: "whale2003@proton.me" },
     },
     servers: [{ url: server }],
     paths: {
       ...paidPaths,
+      "/": {
+        get: {
+          operationId: "getServiceIndex", summary: "Service index (free): description, payTo, links and the price list of all paid endpoints", tags: ["meta"], security: [],
+          responses: { 200: { description: "Service index", content: { "application/json": { schema: {
+            type: "object", properties: {
+              service: { type: "string" }, description: { type: "string" }, payTo: { type: ["string", "null"] }, links: { type: "object" },
+              paid_endpoints: { type: "integer" },
+              prices: { type: "array", items: { type: "object", properties: {
+                method: { type: "string" }, path: { type: "string" }, price_usd: { type: "string" }, description: { type: "string" } } } },
+            },
+          } } } } },
+        },
+      },
       "/news/sample": {
         get: {
           operationId: "getNewsSample", summary: "Free sample: newest item with truncated text", tags: ["news"], security: [],
@@ -846,6 +859,33 @@ app.get("/openapi.json", async (req, res) => {
 app.options("/openapi.json", (_req, res) => {
   res.set({ "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, OPTIONS", "Access-Control-Allow-Headers": "*" }).sendStatus(204);
 });
+
+// ---------- free service index: GET / (price list generated from PAID_ROUTES, never paid) ----------
+const X402SCAN_URL = "https://www.x402scan.com/server/f96fbc84-8538-414c-a847-bcc948103f8d";
+const REPO_URL = "https://github.com/Croomee/x402-markettwits-news";
+const MCP_PACKAGE = "x402-markettwits-mcp";
+const priceUsd = (p) => String(p).replace(/^\$/, "").trim();
+function buildIndex() {
+  return {
+    service: "x402-markettwits-news",
+    description: "Russian and global market news from the MarketTwits Telegram channel (translated to English), plus Bank of Russia (CBR), " +
+      "Moscow Exchange (MOEX), Rosstat and public Telegram channel data. Paid per call via x402 in USDC on Base (eip155:8453).",
+    mode: MODE,
+    payment: { protocol: "x402", version: 2, scheme: "exact", asset: "USDC", network: NETWORK, payTo: PAY_TO || null },
+    payTo: PAY_TO || null,
+    links: {
+      openapi: "/openapi.json",
+      sample: "/news/sample",
+      health: "/health",
+      x402scan: X402SCAN_URL,
+      mcp: { package: MCP_PACKAGE, npm: `https://www.npmjs.com/package/${MCP_PACKAGE}`, install: `npx -y ${MCP_PACKAGE}` },
+      repo: REPO_URL,
+    },
+    paid_endpoints: PAID_ROUTES.length,
+    prices: PAID_ROUTES.map((r) => ({ method: "GET", path: r.path, price_usd: priceUsd(routePrice(r)), description: r.summary })),
+  };
+}
+app.get("/", (_req, res) => res.set("Access-Control-Allow-Origin", "*").json(buildIndex()));
 
 app.post("/ingest", express.json({ limit: "2mb" }), (req, res) => {
   if (!INGEST_TOKEN) return res.status(404).json({ error: "ingest disabled" });
