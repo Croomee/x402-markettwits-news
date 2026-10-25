@@ -23,7 +23,11 @@ import { parseTerms, matchesTerms, parseNumParam, isoSec, buildSummary, topTopic
   parseFloatParam, parseCursorId, newsSince, normalizeCountryCode, countryNews, movers, dataSurprises, sentiment, digest } from "./news-logic.mjs";
 import { parseIsoDate, parseCodes, parseTicker, parseIndexCodes, getFx, getKeyRate, getQuote, getIndex, getMovers, getFuel } from "./ru-data.mjs";
 import { normalizeChannel, parseChannelList, channelLatest, channelSearch } from "./tg.mjs";
+import { readFile } from 'fs/promises';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 4021);
 const HOST = process.env.HOST || "0.0.0.0";
@@ -1269,5 +1273,18 @@ const PRODUCT_OPS = {
 for (const op of ["compare", "monitor", "history"]) {
   app.get(`/product/${op}`, async (req, res) => { const [status, body] = await PRODUCT_OPS[op](req.query); res.status(status).json(body); }); // >=400 never settled
 }
+
+// ... твой существующий код ...
+
+app.get('/agents.json', async (req, res) => {
+  try {
+    const filePath = path.join(__dirname, 'agents.json');
+    const data = await readFile(filePath, 'utf8');
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.send(data);
+  } catch (err) {
+    res.status(404).send('agents.json not found');
+  }
+});
 
 app.listen(PORT, HOST, () => console.log(`proxy=${describeProxy(proxyConfig())} x402-news listening on ${HOST}:${PORT} mode=${MODE} network=${NETWORK} facilitator=${FACILITATOR_TYPE} price=${PRICE} payTo=${PAY_TO || "-"} ingest=${INGEST_TOKEN ? "on" : "off"} parser=${parserConfigured() ? "on" : "off"} file=${NEWS_FILE}`));
