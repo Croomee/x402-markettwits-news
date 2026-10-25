@@ -21,4 +21,4 @@ MCP: npx -y x402-markettwits-mcp
 - GET /product/compare?urls=... — compare several products
 - GET /product/history?url=... — price history
 
-All endpoints require x402 payment in USDC on Base. Prices range from $0.0015 to $0.01 per call.
+All endpoints require x402 payment in USDC on Base. Prices range from $0.001 to $0.005 per call.
