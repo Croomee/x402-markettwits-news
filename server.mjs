@@ -10,6 +10,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
+import { readFile } from 'fs/promises';
 import { paymentMiddleware, x402ResourceServer } from "@x402/express";
 import { HTTPFacilitatorClient } from "@x402/core/server";
 import { ExactEvmScheme } from "@x402/evm/exact/server";
@@ -23,7 +24,7 @@ import { parseTerms, matchesTerms, parseNumParam, isoSec, buildSummary, topTopic
   parseFloatParam, parseCursorId, newsSince, normalizeCountryCode, countryNews, movers, dataSurprises, sentiment, digest } from "./news-logic.mjs";
 import { parseIsoDate, parseCodes, parseTicker, parseIndexCodes, getFx, getKeyRate, getQuote, getIndex, getMovers, getFuel } from "./ru-data.mjs";
 import { normalizeChannel, parseChannelList, channelLatest, channelSearch } from "./tg.mjs";
-import { readFile } from 'fs/promises';
+
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const HERE = path.dirname(fileURLToPath(import.meta.url));
