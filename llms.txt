@@ -1,0 +1,24 @@
+# MarketTwits News x402 API
+
+Paid real-time Russian and global market news from the MarketTwits Telegram channel (translated to English), plus Bank of Russia FX rates, Moscow Exchange quotes, Rosstat data, public Telegram channels, and Wildberries/Ozon product information.
+
+Base URL: https://x402-markettwits-news.onrender.com
+Payment: USDC on Base (eip155:8453) via x402
+OpenAPI: https://x402-markettwits-news.onrender.com/openapi.json
+Agents: https://x402-markettwits-news.onrender.com/agents.json
+MCP: npx -y x402-markettwits-mcp
+
+## Main paid endpoints
+- GET /news/latest — latest translated MarketTwits news
+- GET /news/important — high-importance news only
+- GET /news/search?q= — keyword search in news
+- GET /news/summary?q= — short English summary of latest news on a topic
+- GET /news/digest — sectioned briefing (central banks, macro, energy, equities, crypto, geopolitics)
+- GET /ru/fx?codes=USD — official Bank of Russia FX rates
+- GET /moex/quote?ticker=SBER — Moscow Exchange stock quote
+- GET /tg/channel/latest?channel=... — latest posts from a public Telegram channel
+- GET /product/info?url=... — Wildberries / Ozon product card (title, price, rating, stock)
+- GET /product/compare?urls=... — compare several products
+- GET /product/history?url=... — price history
+
+All endpoints require x402 payment in USDC on Base. Prices range from $0.0015 to $0.01 per call.
