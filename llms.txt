@@ -20,5 +20,9 @@ MCP: npx -y x402-markettwits-mcp
 - GET /product/info?url=... — Wildberries / Ozon product card (title, price, rating, stock)
 - GET /product/compare?urls=... — compare several products
 - GET /product/history?url=... — price history
+- GET /alerts/price?url=...&target_price=1500 — price-drop alert: is a Wildberries product at/below a target price in RUB ($0.0025; Ozon accepted but currently blocked → 502, not charged)
+- GET /alerts/news?q=oil,OPEC&since=<id or ISO time> — new high-importance news matching keywords since a news id or time ($0.002)
+- GET /alerts/fx?code=USD&min=75&max=95 — official CBR rate outside a min/max band: triggered, rate, breach ($0.0015)
+- GET /digest/daily — daily Russia market digest: CBR key rate, USD/EUR/CNY, Rosstat fuel prices, top news ($0.005)
 
-All endpoints require x402 payment in USDC on Base. Prices range from $0.001 to $0.005 per call.
+31 paid endpoints in total (full list with prices: GET / or /openapi.json). All paid endpoints require x402 payment in USDC on Base. Prices range from $0.001 to $0.005 per call. Invalid parameters return 400 before payment; upstream failures (502) and not-found (404) are never charged.

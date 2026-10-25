@@ -49,10 +49,10 @@ async function connect(env, api) {
   return { client, call, tools, address, specSource };
 }
 
-test("snapshot -> 27 tools with prices, unique names, required params", () => {
+test("snapshot -> 31 tools with prices, unique names, required params", () => {
   const tools = specToTools(bundledSpec());
-  assert.equal(tools.length, 27);
-  assert.equal(new Set(tools.map((t) => t.name)).size, 27);
+  assert.equal(tools.length, 31);
+  assert.equal(new Set(tools.map((t) => t.name)).size, 31);
   for (const t of tools) {
     assert.match(t.name, /^[a-z][a-z0-9_]{2,63}$/);
     assert.ok(t.price_usd > 0 && t.price_usd <= 0.01, t.name);
@@ -62,6 +62,12 @@ test("snapshot -> 27 tools with prices, unique names, required params", () => {
   assert.equal(byPath["/ru/fx"].price_usd, 0.001);
   assert.equal(byPath["/tg/search"].price_usd, 0.003);
   assert.deepEqual(byPath["/tg/search"].params.filter((p) => p.required).map((p) => p.name), ["q", "channels"]);
+  // alerts + daily digest
+  assert.deepEqual(["/alerts/price", "/alerts/news", "/alerts/fx", "/digest/daily"].map((p) => byPath[p].price_usd), [0.0025, 0.002, 0.0015, 0.005]);
+  assert.deepEqual(["/alerts/price", "/alerts/news", "/alerts/fx", "/digest/daily"].map((p) => byPath[p].name),
+    ["check_price_alert", "check_news_keyword_alert", "check_fx_rate_alert", "get_daily_ru_market_digest"]);
+  assert.deepEqual(byPath["/alerts/price"].params.filter((p) => p.required).map((p) => p.name), ["url", "target_price"]);
+  assert.deepEqual(byPath["/alerts/fx"].params.map((p) => p.name), ["code", "min", "max"]);
   assert.equal(snakeCase("getCbrFxRates"), "get_cbr_fx_rates");
   assert.equal(buildUrl(BASE, "/ru/fx", { codes: "USD,EUR", date: undefined }), `${BASE}/ru/fx?codes=USD%2CEUR`);
 });
@@ -77,17 +83,17 @@ test("config: key validation never echoes the key; cap default 0.02", () => {
   assert.equal(readPrivateKey({ X402_PRIVATE_KEY: k.slice(2) }).key, k, "0x prefix optional");
 });
 
-test("tools/list over MCP: 27 tools, live spec preferred, bundled fallback", async () => {
+test("tools/list over MCP: 31 tools, live spec preferred, bundled fallback", async () => {
   const live = await connect({}, mockApi());
   const { tools } = await live.client.listTools();
-  assert.equal(tools.length, 27);
+  assert.equal(tools.length, 31);
   assert.equal(live.specSource, "live");
   const quote = tools.find((t) => t.name === "get_moex_quote");
   assert.deepEqual(quote.inputSchema.required, ["ticker"]);
   assert.equal(quote.annotations.readOnlyHint, true);
   const down = await connect({}, { fetchImpl: async () => { throw new Error("offline"); } });
   assert.equal(down.specSource, "bundled");
-  assert.equal((await down.client.listTools()).tools.length, 27);
+  assert.equal((await down.client.listTools()).tools.length, 31);
 });
 
 test("no key: clear payment_required error with the price, nothing signed", async () => {

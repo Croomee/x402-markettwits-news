@@ -1,6 +1,6 @@
 {
   "name": "MarketTwits News",
-  "description": "Paid real-time Russian and global market news from the MarketTwits Telegram channel (translated to English), plus Bank of Russia FX rates, MOEX quotes, Rosstat data, public Telegram channels, and Wildberries/Ozon product information. Pay per request in USDC on Base via x402.",
+  "description": "Paid real-time Russian and global market news from the MarketTwits Telegram channel (translated to English), plus Bank of Russia FX rates, MOEX quotes, Rosstat data, public Telegram channels, Wildberries/Ozon product information, price/news/FX alerts and a daily Russia market digest. Pay per request in USDC on Base via x402.",
   "url": "https://x402-markettwits-news.onrender.com",
   "openapi": "https://x402-markettwits-news.onrender.com/openapi.json",
   "mcp": {
@@ -13,8 +13,198 @@
     "currency": "USDC",
     "network": "eip155:8453",
     "protocol": "x402",
-    "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2"
+    "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2",
+    "range_usd": "0.001-0.005"
   },
+  "paid_endpoints": 31,
+  "endpoints": [
+    {
+      "method": "GET",
+      "path": "/news/latest",
+      "price_usd": "0.0015",
+      "description": "Latest translated MarketTwits news (newest first)"
+    },
+    {
+      "method": "GET",
+      "path": "/news/important",
+      "price_usd": "0.0015",
+      "description": "High-importance news only (newest first)"
+    },
+    {
+      "method": "GET",
+      "path": "/news/search",
+      "price_usd": "0.0015",
+      "description": "Keyword search in translated news (newest first)"
+    },
+    {
+      "method": "GET",
+      "path": "/news/alerts/check",
+      "price_usd": "0.002",
+      "description": "Keyword alert check: how many matching items in the last N hours"
+    },
+    {
+      "method": "GET",
+      "path": "/news/summary",
+      "price_usd": "0.004",
+      "description": "Short extractive English summary of the latest news on a keyword"
+    },
+    {
+      "method": "GET",
+      "path": "/news/top-topics",
+      "price_usd": "0.0025",
+      "description": "Top 5 keywords/hashtags in high-importance news of the last N hours"
+    },
+    {
+      "method": "GET",
+      "path": "/news/summary/recent",
+      "price_usd": "0.0035",
+      "description": "Extractive English summary of news on a keyword from the last N hours"
+    },
+    {
+      "method": "GET",
+      "path": "/news/alerts/new",
+      "price_usd": "0.0025",
+      "description": "Is there new HIGH-importance news on a keyword in the last N hours?"
+    },
+    {
+      "method": "GET",
+      "path": "/news/topics/trending",
+      "price_usd": "0.002",
+      "description": "Trending topics in high-importance news with change vs. the previous window"
+    },
+    {
+      "method": "GET",
+      "path": "/news/since",
+      "price_usd": "0.001",
+      "description": "Incremental feed: items newer than the id you already have (cursor polling)"
+    },
+    {
+      "method": "GET",
+      "path": "/news/movers",
+      "price_usd": "0.0025",
+      "description": "Top gainers/losers reported in the news ('#TICKER = ±X%')"
+    },
+    {
+      "method": "GET",
+      "path": "/news/country",
+      "price_usd": "0.002",
+      "description": "News about one country (flag emoji + country keywords) with counts and top topics"
+    },
+    {
+      "method": "GET",
+      "path": "/news/data-surprises",
+      "price_usd": "0.003",
+      "description": "Macro data and earnings vs. expectations: actual, expected, previous, surprise"
+    },
+    {
+      "method": "GET",
+      "path": "/news/sentiment",
+      "price_usd": "0.0025",
+      "description": "Heuristic bullish/bearish tone of news on a keyword (lexicon, not a model)"
+    },
+    {
+      "method": "GET",
+      "path": "/news/digest",
+      "price_usd": "0.005",
+      "description": "Sectioned briefing: central banks, macro, energy, equities, crypto, geopolitics"
+    },
+    {
+      "method": "GET",
+      "path": "/ru/fx",
+      "price_usd": "0.001",
+      "description": "Official Bank of Russia FX rates (RUB) with day-over-day change"
+    },
+    {
+      "method": "GET",
+      "path": "/ru/key-rate",
+      "price_usd": "0.001",
+      "description": "Bank of Russia key rate: current level, since when, and recent changes"
+    },
+    {
+      "method": "GET",
+      "path": "/moex/quote",
+      "price_usd": "0.0015",
+      "description": "Moscow Exchange stock quote (delayed ~15 min): price, change, volume, bid/offer"
+    },
+    {
+      "method": "GET",
+      "path": "/moex/index",
+      "price_usd": "0.0015",
+      "description": "MOEX index values (IMOEX, RTSI, sector indices) or the index catalogue"
+    },
+    {
+      "method": "GET",
+      "path": "/moex/movers",
+      "price_usd": "0.002",
+      "description": "Top gainers and losers on the Moscow Exchange main board (TQBR), with market breadth"
+    },
+    {
+      "method": "GET",
+      "path": "/ru/fuel",
+      "price_usd": "0.0015",
+      "description": "Russian retail fuel prices (AI-92/95/98, diesel) — Rosstat weekly averages"
+    },
+    {
+      "method": "GET",
+      "path": "/tg/channel/latest",
+      "price_usd": "0.002",
+      "description": "Latest posts of a public Telegram channel (text, date, views, link)"
+    },
+    {
+      "method": "GET",
+      "path": "/tg/search",
+      "price_usd": "0.003",
+      "description": "Search up to 5 public Telegram channels for a keyword"
+    },
+    {
+      "method": "GET",
+      "path": "/product/info",
+      "price_usd": "0.002",
+      "description": "Wildberries / Ozon product card: title, price (RUB), rating, reviews, stock"
+    },
+    {
+      "method": "GET",
+      "path": "/product/compare",
+      "price_usd": "0.003",
+      "description": "Compare 2-5 Wildberries products: prices, cheapest, price spread, stock"
+    },
+    {
+      "method": "GET",
+      "path": "/product/monitor",
+      "price_usd": "0.0025",
+      "description": "Price-target check for one product: is the current price at or below target_price?"
+    },
+    {
+      "method": "GET",
+      "path": "/product/history",
+      "price_usd": "0.002",
+      "description": "Wildberries price history: weekly CDN points + observed + live price, min/max/avg, 30-day change"
+    },
+    {
+      "method": "GET",
+      "path": "/alerts/price",
+      "price_usd": "0.0025",
+      "description": "Price-drop alert: is a Wildberries product at or below your target price?"
+    },
+    {
+      "method": "GET",
+      "path": "/alerts/news",
+      "price_usd": "0.002",
+      "description": "Keyword alert: new HIGH-importance news since an id or time"
+    },
+    {
+      "method": "GET",
+      "path": "/alerts/fx",
+      "price_usd": "0.0015",
+      "description": "FX alert: is the official CBR rate of a currency outside your min/max band?"
+    },
+    {
+      "method": "GET",
+      "path": "/digest/daily",
+      "price_usd": "0.005",
+      "description": "Daily Russia market digest: key rate, USD/EUR/CNY, fuel prices, top news"
+    }
+  ],
   "tags": [
     "news",
     "finance",
@@ -26,7 +216,9 @@
     "cbr",
     "rosstat",
     "x402",
-    "market-data"
+    "market-data",
+    "alerts",
+    "digest"
   ],
   "x402scan": "https://www.x402scan.com/server/f96fbc84-8538-414c-a847-bcc948103f8d",
   "repository": "https://github.com/Croomee/x402-markettwits-news"

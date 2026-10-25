@@ -4,6 +4,7 @@
 //        GET /news/alerts/check ($0.002), /news/summary ($0.004), /news/top-topics ($0.0025)
 //        GET /news/summary/recent ($0.0035), /news/alerts/new ($0.0025), /news/topics/trending ($0.002)
 //        GET /product/info?url= ($0.002)  Wildberries / Ozon product card (502 on upstream failure -> never settled)
+//        GET /alerts/price ($0.0025), /alerts/news ($0.002), /alerts/fx ($0.0015), /digest/daily ($0.005)
 // Admin: POST /ingest  (Authorization: Bearer <INGEST_TOKEN>)
 import express from "express";
 import fs from "node:fs";
@@ -24,6 +25,8 @@ import { parseTerms, matchesTerms, parseNumParam, isoSec, buildSummary, topTopic
   parseFloatParam, parseCursorId, newsSince, normalizeCountryCode, countryNews, movers, dataSurprises, sentiment, digest } from "./news-logic.mjs";
 import { parseIsoDate, parseCodes, parseTicker, parseIndexCodes, getFx, getKeyRate, getQuote, getIndex, getMovers, getFuel } from "./ru-data.mjs";
 import { normalizeChannel, parseChannelList, channelLatest, channelSearch } from "./tg.mjs";
+import { priceAlert, parseKeywords, parseMatch, parseSince, newsAlert, parseCurrency, parseBound, fxAlertInputError, fxAlert,
+  dailyDigest, settleWithin, DIGEST_FX } from "./alerts-logic.mjs";
 
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -442,6 +445,49 @@ const CHANNEL_PARAM = { type: "string", pattern: "^@?[A-Za-z][A-Za-z0-9_]{3,31}$
 const CHANNELS_PARAM = { type: "string", description: "1-5 comma-separated public channel usernames, e.g. markettwits,rbc_news" };
 const TG_LIMIT_PARAM = { type: "integer", minimum: 1, maximum: 50, default: 20, description: "Messages to return (default 20, max 50)" };
 const DATA_502 = (what) => UPSTREAM_502(`${what} unreachable or returned an unexpected response.`);
+// ---------- alerts + daily digest ----------
+const KEYWORDS_PARAM = { type: "string", minLength: 1, maxLength: 100,
+  description: "1-10 keywords separated by commas or spaces (case-insensitive, '#' optional), e.g. 'oil,OPEC' or 'Fed rates'. match=any (default): any keyword; match=all: every keyword." };
+const ALERT_SINCE_PARAM = { type: "string", maxLength: 40,
+  description: "News item id you already have (same cursor as /news/since: larger ids are new) or an ISO 8601 time (published after it). Default: last 24 hours." };
+const MATCH_PARAM = { type: "string", enum: ["any", "all"], default: "any", description: "any (default): an item matching any keyword triggers; all: every keyword must appear" };
+const CURRENCY_PARAM = { type: "string", pattern: "^[A-Za-z]{3}$", description: "ISO currency code quoted by the Bank of Russia, e.g. USD, EUR, CNY" };
+const BOUND_PARAM = (which) => ({ type: "string", pattern: "^[0-9]+([.,][0-9]+)?$",
+  description: `${which} bound in RUB per 1 unit of the currency (e.g. ${which === "Lower" ? "75" : "95"}). Give min and/or max.` });
+const DIGEST_LIMIT_PARAM = { type: "integer", minimum: 1, maximum: 20, default: 7, description: "Number of top news headlines (default 7, max 20)" };
+const PRICE_ALERT_OUTPUT_SCHEMA = { type: "object", required: ["triggered", "current_price", "target_price", "marketplace", "product_id", "url", "checked_at"],
+  properties: {
+    triggered: { type: "boolean", description: "true when current_price <= target_price and the product is in stock" },
+    current_price: { ...NUMN, description: "RUB; null only when out of stock with no price" }, target_price: { type: "number" },
+    currency: { type: "string", enum: ["RUB"] }, diff_abs: { ...NUMN, description: "current_price - target_price (negative = below target)" }, diff_percent: NUMN,
+    in_stock: { type: ["boolean", "null"] }, marketplace: { type: "string", enum: ["wildberries", "ozon"] }, url: { type: "string", format: "uri" },
+    product_id: { type: "string" }, title: { type: ["string", "null"] }, original_price: NUMN, note: { type: "string" },
+    supported_marketplaces: { type: "object", description: "Which marketplaces currently work" }, checked_at: { type: "string", format: "date-time" } } };
+const NEWS_ALERT_ITEM_SCHEMA = { ...BRIEF_SCHEMA, properties: { ...BRIEF_SCHEMA.properties, text_en: { type: "string" },
+  matched: { type: "array", items: { type: "string" }, description: "Keywords found in this item" } } };
+const NEWS_ALERT_OUTPUT_SCHEMA = { type: "object", required: ["triggered", "count", "items", "keywords", "since", "next_since"], properties: {
+  triggered: { type: "boolean", description: "true when at least one new HIGH-importance item matched" }, query: { type: "string" },
+  keywords: { type: "array", items: { type: "string" } }, match: { type: "string", enum: ["any", "all"] }, importance: { type: "string", enum: ["high"] },
+  since: { type: "object", description: "{mode:'id', id} or {mode:'time', time}" }, count: { type: "integer", description: "All matching new items" },
+  items: { type: "array", maxItems: 20, items: NEWS_ALERT_ITEM_SCHEMA, description: "Up to 20, newest first" },
+  latest_id: { type: ["integer", "null"], description: "Newest id in the store" },
+  next_since: { type: "string", description: "Pass as since= on the next poll to get only newer items" } } };
+const FX_ALERT_OUTPUT_SCHEMA = { type: "object", required: ["triggered", "code", "rate", "min", "max", "breach", "date"], properties: {
+  triggered: { type: "boolean" }, code: STR, name: STRN, rate: { type: "number", description: "Official CBR rate, RUB per 1 unit" },
+  min: NUMN, max: NUMN, breach: { type: ["string", "null"], enum: ["below_min", "above_max", null] },
+  distance: { ...NUMN, description: "rate - breached bound (null when inside the range)" }, unit: STR, nominal: INT, value: NUM,
+  prev_rate: NUMN, change_pct: NUMN, date: { type: "string", format: "date", description: "Date the CBR rate is set for" }, ...META_PROPS } };
+const DAILY_DIGEST_OUTPUT_SCHEMA = { type: "object", required: ["date", "partial", "key_rate", "fx", "fuel", "news"], properties: {
+  date: { type: "string", format: "date" }, generated_at: { type: "string", format: "date-time" },
+  partial: { type: "boolean", description: "true when a section is null (see notes)" },
+  key_rate: { type: ["object", "null"], properties: { rate: NUM, as_of: STR, effective_since: STRN, previous_rate: NUMN, last_change_bp: INTN, unit: STR } },
+  fx: { type: ["object", "null"], properties: { date: STR, base: STR, rates: { type: "array", items: { type: "object", properties: {
+    code: STR, rate: NUM, change: NUMN, change_pct: NUMN } } } } },
+  fuel: { type: ["object", "null"], description: "null when Rosstat is slow/unreachable (the call still succeeds)", properties: { as_of: STRN, unit: STR,
+    prices: { type: "array", items: { type: "object", properties: { fuel: STR, price: NUM, change: NUMN, change_pct: NUMN } } } } },
+  news: { type: "object", properties: { window_hours: INT, high_count_24h: INT, fallback: { type: "boolean" },
+    top: { type: "array", items: BRIEF_SCHEMA }, top_topics: TOPIC_COUNT_SCHEMA } },
+  notes: { type: "array", items: STR }, sources: { type: "object" } } };
 const EX_T = "2026-10-20T12:20:00Z";
 const PAID_ROUTES = [
   { path: "/news/latest", operationId: "getLatestNews", summary: "Latest translated MarketTwits news (newest first)",
@@ -717,6 +763,53 @@ const PAID_ROUTES = [
       change_30d: { vs_date: "2026-09-20", vs_price: 1471.2, abs: 120.8, percent: 8.21 }, history_limited: false,
       sources: { weekly_cdn: 2, observed: 0, live: 1 }, checked_at: "2026-10-21T16:30:00Z" },
     extraResponses: UPSTREAM_502("No price at all (no weekly history and the live fetch failed).") },
+  { path: "/alerts/price", operationId: "checkPriceAlert", price: "$0.0025", tags: ["alerts"],
+    summary: "Price-drop alert: is a Wildberries product at or below your target price?",
+    description: "Live price of one product (same chain as /product/monitor) vs target_price in RUB: triggered (current <= target and in stock), " +
+      "current_price, diff. Wildberries works; Ozon URLs are accepted but Ozon's anti-bot currently blocks them (502, payment not settled).",
+    params: { url: PRODUCT_URL_PARAM, target_price: TARGET_PRICE_PARAM }, required: ["url", "target_price"], badRequest: true,
+    example: { url: "https://www.wildberries.ru/catalog/839226871/detail.aspx", target_price: "1500" },
+    badRequestText: "url invalid/unsupported, or target_price missing, non-numeric, zero or negative. Returned before payment.",
+    outputSchema: PRICE_ALERT_OUTPUT_SCHEMA, ok200: "Alert result (triggered false when above target or out of stock)",
+    outputExample: { triggered: false, current_price: 1592, target_price: 1500, currency: "RUB", diff_abs: 92, diff_percent: 6.13, in_stock: true,
+      marketplace: "wildberries", url: "https://www.wildberries.ru/catalog/839226871/detail.aspx", product_id: "839226871",
+      title: "Наушники беспроводные TWS Pro 2", original_price: 2525, checked_at: "2026-10-21T16:30:00Z" },
+    extraResponses: UPSTREAM_502("No product data could be fetched (Ozon anti-bot, timeout, not found).") },
+  { path: "/alerts/news", operationId: "checkNewsKeywordAlert", price: "$0.002", tags: ["alerts"],
+    summary: "Keyword alert: new HIGH-importance news since an id or time",
+    description: "High-importance MarketTwits news matching any (or all) of 1-10 keywords, newer than since (an item id, same cursor as /news/since, " +
+      "or an ISO time; default last 24h). Returns triggered, count, up to 20 items newest first with matched keywords, and next_since for the next poll.",
+    params: { q: KEYWORDS_PARAM, since: ALERT_SINCE_PARAM, match: MATCH_PARAM }, required: ["q"], badRequest: true,
+    example: { q: "oil,OPEC", since: "2026-10-21T00:00:00Z" },
+    badRequestText: "q missing (with a payment attached), empty or longer than 100 chars/10 keywords; since not an id or ISO time; match not any|all. Returned before payment.",
+    outputSchema: NEWS_ALERT_OUTPUT_SCHEMA, ok200: "Alert result (triggered false, items [] when nothing new matched)",
+    outputExample: { triggered: true, query: "oil,opec", keywords: ["oil", "opec"], match: "any", importance: "high",
+      since: { mode: "time", time: "2026-10-21T00:00:00Z" }, count: 1,
+      items: [{ ...EX_BRIEF, text_en: "OPEC+ ...", matched: ["opec"] }], latest_id: 389909, next_since: "389909" } },
+  { path: "/alerts/fx", operationId: "checkFxRateAlert", price: "$0.0015", tags: ["alerts", "ru-data"],
+    summary: "FX alert: is the official CBR rate of a currency outside your min/max band?",
+    description: "Latest official Bank of Russia rate (RUB per 1 unit, as /ru/fx) for one currency vs min and/or max: triggered, rate, " +
+      "breach below_min|above_max|null, distance and the CBR date. Unknown code -> 404, cbr.ru failure -> 502 (neither is settled).",
+    params: { code: CURRENCY_PARAM, min: BOUND_PARAM("Lower"), max: BOUND_PARAM("Upper") }, required: ["code"], badRequest: true,
+    example: { code: "USD", min: "75", max: "95" },
+    badRequestText: "code missing (with a payment attached) or not 3 letters, RUB, min/max non-numeric or <= 0, neither given, or min > max. Returned before payment.",
+    outputSchema: FX_ALERT_OUTPUT_SCHEMA, ok200: "Alert result (breach null when inside the band)",
+    outputExample: { triggered: false, code: "USD", name: "Доллар США", rate: 81.9739, min: 75, max: 95, breach: null, distance: null, unit: "RUB per 1 unit",
+      nominal: 1, value: 81.9739, prev_rate: 82.8879, change_pct: -1.103, date: "2026-10-22", source: "Bank of Russia (cbr.ru/scripts/XML_daily.asp)", fetched_at: "2026-10-22T03:51:31Z" },
+    extraResponses: { ...NOT_FOUND_404("Currency not quoted by the CBR."), ...DATA_502("cbr.ru") } },
+  { path: "/digest/daily", operationId: "getDailyRuMarketDigest", price: "$0.005", tags: ["digest", "ru-data"],
+    summary: "Daily Russia market digest: key rate, USD/EUR/CNY, fuel prices, top news",
+    description: "One call: CBR key rate, official USD/EUR/CNY rates with change, Rosstat weekly fuel prices and the top high-importance news of 24h " +
+      "with topics. Fuel is null with a note if Rosstat is slow (call still succeeds); 502, not settled, only if both key rate and FX fail.",
+    params: { limit: DIGEST_LIMIT_PARAM }, required: [], example: { limit: 7 }, badRequest: true,
+    badRequestText: "limit is not a number. Returned before payment.",
+    outputSchema: DAILY_DIGEST_OUTPUT_SCHEMA, ok200: "Digest (partial true and notes when a section is unavailable)",
+    outputExample: { date: "2026-10-22", generated_at: "2026-10-22T06:00:00Z", partial: false,
+      key_rate: { rate: 14, as_of: "2026-10-21", effective_since: "2026-07-27", previous_rate: 14.25, last_change_bp: -25, unit: "% per annum" },
+      fx: { date: "2026-10-22", base: "RUB", rates: [{ code: "USD", rate: 81.9739, change: -0.914, change_pct: -1.103 }] },
+      fuel: { as_of: "2026-10-12", unit: "RUB per litre", prices: [{ fuel: "ai92", price: 74.71, change: -0.01, change_pct: -0.01 }] },
+      news: { window_hours: 24, high_count_24h: 70, fallback: false, top: [EX_BRIEF], top_topics: [{ topic: "Ukraine", count: 12 }] } },
+    extraResponses: DATA_502("cbr.ru (both key rate and FX)") },
 ];
 const routePrice = (r) => r.price || PRICE;
 const LIST_OUTPUT_SCHEMA = (itemSchema) => ({
@@ -769,7 +862,7 @@ app.get("/openapi.json", async (req, res) => {
         "central banks, oil/commodities, geopolitics, equities and crypto. Items are tagged high/medium importance and " +
         "updated every few minutes. Ideal for trading bots and news agents. Also sells Russian market data (CBR FX and key rate, " +
         "MOEX quotes/indices/movers, Rosstat fuel prices), public Telegram channel reading/search and Wildberries/Ozon product data.",
-      "x-guidance": `Twenty-seven paid endpoints via x402 (USDC, scheme exact, network ${NETWORK}` +
+      "x-guidance": `Thirty-one paid endpoints via x402 (USDC, scheme exact, network ${NETWORK}` +
         `${paid ? `, payTo ${PAY_TO}` : ""}). Feed endpoints, ${PRICE} each: ` +
         `GET /news/latest?limit=N - full feed (high+medium), use for polling/monitoring all market news. ` +
         `GET /news/important?limit=N - only importance=high, use when you want market-moving headlines only. ` +
@@ -812,6 +905,11 @@ app.get("/openapi.json", async (req, res) => {
         `out-of-stock without a price -> 200 below_target:false current_price:null. ` +
         `GET /product/history?url=URL ($0.002) - Wildberries weekly CDN price points + observed + live price, min/max/avg, change_30d, ` +
         `history_limited when only the current price exists. Wildberries works via a headless-browser parser; Ozon is currently blocked (502, not charged). ` +
+        `Alerts and digest: GET /alerts/price?url=URL&target_price=RUB ($0.0025) - triggered when a Wildberries product is at/below target and in stock ` +
+        `(Ozon accepted but currently blocked: 502, not charged); GET /alerts/news?q=oil,OPEC&since=ID_OR_ISO&match=any ($0.002) - new HIGH-importance items ` +
+        `matching the keywords since an item id (as /news/since) or ISO time (default 24h): {triggered, count, items, next_since}; ` +
+        `GET /alerts/fx?code=USD&min=75&max=95 ($0.0015) - official CBR rate vs a band: {triggered, rate, breach below_min|above_max|null, date}; ` +
+        `GET /digest/daily?limit=7 ($0.005) - CBR key rate, USD/EUR/CNY, Rosstat fuel (null with a note if Rosstat is slow) and top high news of 24h. ` +
         `Free: GET / (service index with the full price list), GET /news/sample (one truncated item), GET /health.`,
       contact: { email: "whale2003@proton.me" },
     },
@@ -1032,6 +1130,30 @@ app.get("/product/history", (req, res, next) => {
   const p = parseProductUrl(req.query.url);
   return p.error ? res.status(400).json({ error: p.error }) : next();
 });
+// /alerts/* and /digest/daily: invalid input -> 400 before payment; nothing given and no payment -> 402 (x402scan probes).
+const DIGEST_LIMIT = { def: 7, min: 1, max: 20 };
+function newsAlertInputError(q) {
+  if (parseKeywords(q.q) === null) return "q is required: 1-10 keywords separated by commas or spaces (1-100 characters)";
+  if (parseSince(q.since) === null) return "since must be a news item id (non-negative integer, as in /news/since) or an ISO 8601 time, e.g. 2026-10-21T00:00:00Z";
+  if (parseMatch(q.match) === null) return "match must be any or all";
+  return null;
+}
+app.get("/alerts/price", (req, res, next) => {
+  if (!anyPresent(req, ["url", "target_price"]) && !hasPayment(req)) return next();
+  const e = monitorInputError(req.query);
+  return e ? res.status(400).json({ error: e }) : next();
+});
+app.get("/alerts/news", (req, res, next) => {
+  if (!anyPresent(req, ["q", "since", "match"]) && !hasPayment(req)) return next();
+  const e = newsAlertInputError(req.query);
+  return e ? res.status(400).json({ error: e }) : next();
+});
+app.get("/alerts/fx", (req, res, next) => {
+  if (!anyPresent(req, ["code", "min", "max"]) && !hasPayment(req)) return next();
+  const e = fxAlertInputError(req.query);
+  return e ? res.status(400).json({ error: e }) : next();
+});
+app.get("/digest/daily", numCheck("limit", DIGEST_LIMIT));
 app.get("/admin/proxy-check", async (req, res) => {
   if (!INGEST_TOKEN) return res.status(404).json({ error: "disabled" });
   if (!tokenOk(req.get("authorization"))) return res.status(401).json({ error: "unauthorized" });
@@ -1045,6 +1167,7 @@ app.get("/admin/product-probe", async (req, res) => {
   const dataSpec = Object.values(DATA_OPS).find((d) => d.op === op);
   if (dataSpec) { const [status, body] = await runDataOp(dataSpec, req.query); return res.json({ ok: status === 200, op, status, ms: Date.now() - t, body }); }
   if (op.startsWith("news-") && NEWS_OPS[op.slice(5)]) { const [status, body] = NEWS_OPS[op.slice(5)](req.query); return res.json({ ok: status === 200, op, status, ms: Date.now() - t, body }); }
+  if (op.startsWith("alerts-") && ALERT_OPS[op.slice(7)]) { const [status, body] = await ALERT_OPS[op.slice(7)](req.query); return res.json({ ok: status === 200, op, status, ms: Date.now() - t, body }); }
   if (PRODUCT_OPS[op]) { const [status, body] = await PRODUCT_OPS[op](req.query); return res.json({ ok: status === 200, op, status, ms: Date.now() - t, body }); }
   const p = parseProductUrl(req.query.url);
   if (p.error) return res.status(400).json({ error: p.error });
@@ -1273,7 +1396,53 @@ for (const op of ["compare", "monitor", "history"]) {
   app.get(`/product/${op}`, async (req, res) => { const [status, body] = await PRODUCT_OPS[op](req.query); res.status(status).json(body); }); // >=400 never settled
 }
 
-// ... твой существующий код ...
+// ---------- /alerts/price, /alerts/news, /alerts/fx, /digest/daily (also via /admin/product-probe?op=alerts-<name>) ----------
+// Every 4xx/5xx below is returned before settlement (the x402 middleware settles only on < 400).
+const ALERT_OPS = {
+  async price(q) {
+    const e = monitorInputError(q);
+    if (e) return [400, { error: e }];
+    const p = parseProductUrl(q.url), r = await fetchOne(p);
+    const out = priceAlert(monitorResult({ value: r.value, hint: r.hint, target: parseTargetPrice(q.target_price) }), p.source);
+    if (out) return [200, out];
+    return [502, { error: "upstream_unavailable", detail: r.error, marketplace: p.source,
+      ...(p.source === "ozon" ? { note: "Ozon is currently blocked by its anti-bot; only Wildberries works. The payment was not settled." } : {}) }];
+  },
+  news(q) {
+    const e = newsAlertInputError(q);
+    if (e) return [400, { error: e }];
+    return [200, newsAlert(readNews(), { keywords: parseKeywords(q.q), match: parseMatch(q.match), since: parseSince(q.since) })];
+  },
+  async fx(q) {
+    const e = fxAlertInputError(q);
+    if (e) return [400, { error: e }];
+    const code = parseCurrency(q.code);
+    let fx;
+    try { fx = await getFx({ codes: [code] }); } catch (err) {
+      console.error("[alerts] fx failed:", err.detail || err.message);
+      return [502, { error: "upstream_unavailable", detail: err.detail || err.message }];
+    }
+    const out = fxAlert(fx, code, parseBound(q.min), parseBound(q.max));
+    return out ? [200, out] : [404, { error: "not_found", detail: `the CBR does not quote ${code} (see /ru/fx for the list)` }];
+  },
+  async digest(q) {
+    const limit = parseNumParam(q.limit, DIGEST_LIMIT);
+    if (limit === null) return [400, { error: "limit must be a number" }];
+    const [keyRate, fx, fuel] = await Promise.all([
+      settleWithin(getKeyRate({ months: 12 }), 15000, "cbr.ru key rate"),
+      settleWithin(getFx({ codes: DIGEST_FX }), 15000, "cbr.ru FX"),
+      settleWithin(getFuel({ weeks: 0 }), 8000, "rosstat.gov.ru fuel"), // keeps loading in the background and fills the 6 h cache
+    ]);
+    const out = dailyDigest({ keyRate, fx, fuel, items: readNews(), limit });
+    if (!out) return [502, { error: "upstream_unavailable", detail: `key rate: ${keyRate.error}; fx: ${fx.error}` }];
+    return [200, out];
+  },
+};
+app.get("/alerts/price", async (req, res) => { const [status, body] = await ALERT_OPS.price(req.query); res.status(status).json(body); });
+app.get("/alerts/news", async (req, res) => { const [status, body] = await ALERT_OPS.news(req.query); res.status(status).json(body); });
+app.get("/alerts/fx", async (req, res) => { const [status, body] = await ALERT_OPS.fx(req.query); res.status(status).json(body); });
+app.get("/digest/daily", async (req, res) => { const [status, body] = await ALERT_OPS.digest(req.query); res.status(status).json(body); });
+
 
 app.get('/agents.json', async (req, res) => {
   try {

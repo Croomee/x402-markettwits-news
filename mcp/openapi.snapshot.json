@@ -1186,7 +1186,7 @@
       "get": {
         "operationId": "monitorProductPrice",
         "summary": "Price-target check for one product: is the current price at or below target_price?",
-        "description": "Fetches one Wildberries/Ozon product (same live chain as /product/info) and compares it with target_price (RUB): below_target (current <= target and not out of stock), current_price, diff_abs/diff_percent, in_stock, the full product object and checked_at. Use it as a paid poll for price alerts. If the product is out of stock with no price it returns 200 with below_target false, current_price null, in_stock false and a note; if no product data can be fetched at all it returns 502 and the payment is not settled.",
+        "description": "Fetches one Wildberries/Ozon product (live, as /product/info) and checks it against target_price (RUB). Returns below_target (current <= target and in stock), current_price, diff_abs/diff_percent, in_stock, product and checked_at. Out of stock: 200 with below_target false, current_price null. 502 (payment not settled) if no product data can be fetched.",
         "tags": [
           "product"
         ],
@@ -1235,7 +1235,7 @@
       "get": {
         "operationId": "getProductPriceHistory",
         "summary": "Wildberries price history: weekly CDN points + observed + live price, min/max/avg, 30-day change",
-        "description": "Price history for a Wildberries product: weekly points from WB's public price-history CDN (weekly_cdn), prices this service observed on earlier lookups (observed; in-memory, reset on restart), and the current live price (live). Returns points (oldest first), current, stats min/max/avg, change_30d (vs. the latest point at least 30 days old) and history_limited:true with a note when only the current price exists. Ozon has no public history (only live, currently blocked). 502 (not settled) only when no price at all is available.",
+        "description": "Wildberries price history for url: weekly points from WB's price CDN, prices observed by this service and the live price. Returns points (oldest first), current, stats min/max/avg, change_30d, and history_limited when only the current price exists. Ozon: live price only. 502 (payment not settled) if no price is available.",
         "tags": [
           "product"
         ],
@@ -1265,6 +1265,217 @@
                 "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2",
                 "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
                 "amount": "2000"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "/alerts/price": {
+      "get": {
+        "operationId": "checkPriceAlert",
+        "summary": "Price-drop alert: is a Wildberries product at or below your target price?",
+        "description": "Live price of one product (same chain as /product/monitor) vs target_price in RUB: triggered (current <= target and in stock), current_price, diff. Wildberries works; Ozon URLs are accepted but Ozon's anti-bot currently blocks them (502, payment not settled).",
+        "tags": [
+          "alerts"
+        ],
+        "parameters": [
+          {
+            "name": "url",
+            "required": true,
+            "description": "Product page URL: https://www.wildberries.ru/catalog/<id>/detail.aspx (also wb.ru, *.wildberries.ru) or https://www.ozon.ru/product/<slug>-<id>/ (also *.ozon.ru)",
+            "schema": {
+              "type": "string",
+              "minLength": 10,
+              "maxLength": 2000
+            }
+          },
+          {
+            "name": "target_price",
+            "required": true,
+            "description": "Target price in RUB, a positive number (e.g. 1500 or 1499.90)",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]+([.,][0-9]+)?$"
+            }
+          }
+        ],
+        "x-payment-info": {
+          "price": {
+            "mode": "fixed",
+            "currency": "USD",
+            "amount": "0.0025"
+          },
+          "protocols": [
+            {
+              "x402": {
+                "network": "eip155:8453",
+                "scheme": "exact",
+                "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2",
+                "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                "amount": "2500"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "/alerts/news": {
+      "get": {
+        "operationId": "checkNewsKeywordAlert",
+        "summary": "Keyword alert: new HIGH-importance news since an id or time",
+        "description": "High-importance MarketTwits news matching any (or all) of 1-10 keywords, newer than since (an item id, same cursor as /news/since, or an ISO time; default last 24h). Returns triggered, count, up to 20 items newest first with matched keywords, and next_since for the next poll.",
+        "tags": [
+          "alerts"
+        ],
+        "parameters": [
+          {
+            "name": "q",
+            "required": true,
+            "description": "1-10 keywords separated by commas or spaces (case-insensitive, '#' optional), e.g. 'oil,OPEC' or 'Fed rates'. match=any (default): any keyword; match=all: every keyword.",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            }
+          },
+          {
+            "name": "since",
+            "required": false,
+            "description": "News item id you already have (same cursor as /news/since: larger ids are new) or an ISO 8601 time (published after it). Default: last 24 hours.",
+            "schema": {
+              "type": "string",
+              "maxLength": 40
+            }
+          },
+          {
+            "name": "match",
+            "required": false,
+            "description": "any (default): an item matching any keyword triggers; all: every keyword must appear",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "any",
+                "all"
+              ],
+              "default": "any"
+            }
+          }
+        ],
+        "x-payment-info": {
+          "price": {
+            "mode": "fixed",
+            "currency": "USD",
+            "amount": "0.002"
+          },
+          "protocols": [
+            {
+              "x402": {
+                "network": "eip155:8453",
+                "scheme": "exact",
+                "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2",
+                "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                "amount": "2000"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "/alerts/fx": {
+      "get": {
+        "operationId": "checkFxRateAlert",
+        "summary": "FX alert: is the official CBR rate of a currency outside your min/max band?",
+        "description": "Latest official Bank of Russia rate (RUB per 1 unit, as /ru/fx) for one currency vs min and/or max: triggered, rate, breach below_min|above_max|null, distance and the CBR date. Unknown code -> 404, cbr.ru failure -> 502 (neither is settled).",
+        "tags": [
+          "alerts",
+          "ru-data"
+        ],
+        "parameters": [
+          {
+            "name": "code",
+            "required": true,
+            "description": "ISO currency code quoted by the Bank of Russia, e.g. USD, EUR, CNY",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z]{3}$"
+            }
+          },
+          {
+            "name": "min",
+            "required": false,
+            "description": "Lower bound in RUB per 1 unit of the currency (e.g. 75). Give min and/or max.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]+([.,][0-9]+)?$"
+            }
+          },
+          {
+            "name": "max",
+            "required": false,
+            "description": "Upper bound in RUB per 1 unit of the currency (e.g. 95). Give min and/or max.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]+([.,][0-9]+)?$"
+            }
+          }
+        ],
+        "x-payment-info": {
+          "price": {
+            "mode": "fixed",
+            "currency": "USD",
+            "amount": "0.0015"
+          },
+          "protocols": [
+            {
+              "x402": {
+                "network": "eip155:8453",
+                "scheme": "exact",
+                "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2",
+                "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                "amount": "1500"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "/digest/daily": {
+      "get": {
+        "operationId": "getDailyRuMarketDigest",
+        "summary": "Daily Russia market digest: key rate, USD/EUR/CNY, fuel prices, top news",
+        "description": "One call: CBR key rate, official USD/EUR/CNY rates with change, Rosstat weekly fuel prices and the top high-importance news of 24h with topics. Fuel is null with a note if Rosstat is slow (call still succeeds); 502, not settled, only if both key rate and FX fail.",
+        "tags": [
+          "digest",
+          "ru-data"
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "required": false,
+            "description": "Number of top news headlines (default 7, max 20)",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 20,
+              "default": 7
+            }
+          }
+        ],
+        "x-payment-info": {
+          "price": {
+            "mode": "fixed",
+            "currency": "USD",
+            "amount": "0.005"
+          },
+          "protocols": [
+            {
+              "x402": {
+                "network": "eip155:8453",
+                "scheme": "exact",
+                "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2",
+                "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                "amount": "5000"
               }
             }
           ]

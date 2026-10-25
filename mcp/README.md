@@ -4,7 +4,7 @@ MCP server (stdio) for the pay-per-call **x402-markettwits-news** API: MarketTwi
 Russian market data (Bank of Russia FX and key rate, MOEX quotes, indices and movers, Rosstat fuel prices),
 public Telegram channels and Wildberries product prices.
 
-Every API endpoint is one MCP tool (27 tools). Each call costs a fixed **$0.001–$0.005 in USDC on Base**, paid
+Every API endpoint is one MCP tool (31 tools). Each call costs a fixed **$0.001–$0.005 in USDC on Base**, paid
 automatically through [x402](https://x402.org) from a wallet you configure. Only successful responses are charged;
 invalid parameters (400), not found (404) and upstream failures (502) are free.
 
@@ -76,6 +76,10 @@ docker run -i --rm -e X402_PRIVATE_KEY x402-markettwits-mcp
 | `get_ru_fuel_prices` | `/ru/fuel` (Rosstat weekly) | $0.0015 |
 | `get_telegram_channel_latest` / `search_telegram_channels` | `/tg/channel/latest`, `/tg/search` | $0.002 / $0.003 |
 | `get_product_info` / `compare_products` / `monitor_product_price` / `get_product_price_history` | `/product/*` (Wildberries) | $0.002 / $0.003 / $0.0025 / $0.002 |
+| `check_price_alert` | `/alerts/price` (Wildberries; Ozon currently blocked → 502, free) | $0.0025 |
+| `check_news_keyword_alert` | `/alerts/news` (new high-importance news by keywords since an id/time) | $0.002 |
+| `check_fx_rate_alert` | `/alerts/fx` (CBR rate outside a min/max band) | $0.0015 |
+| `get_daily_ru_market_digest` | `/digest/daily` (key rate, USD/EUR/CNY, fuel, top news) | $0.005 |
 
 Each tool returns JSON: `{ ok: true, endpoint, data, payment: { price_usd, transaction, payer, ... } }`, or
 `{ ok: false, error, ... }` with `isError: true`. The error codes are:
