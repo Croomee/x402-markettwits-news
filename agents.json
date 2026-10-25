@@ -1,0 +1,33 @@
+{
+  "name": "MarketTwits News",
+  "description": "Paid real-time Russian and global market news from the MarketTwits Telegram channel (translated to English), plus Bank of Russia FX rates, MOEX quotes, Rosstat data, public Telegram channels, and Wildberries/Ozon product information. Pay per request in USDC on Base via x402.",
+  "url": "https://x402-markettwits-news.onrender.com",
+  "openapi": "https://x402-markettwits-news.onrender.com/openapi.json",
+  "mcp": {
+    "package": "x402-markettwits-mcp",
+    "install": "npx -y x402-markettwits-mcp",
+    "npm": "https://www.npmjs.com/package/x402-markettwits-mcp"
+  },
+  "pricing": {
+    "model": "per-request",
+    "currency": "USDC",
+    "network": "eip155:8453",
+    "protocol": "x402",
+    "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2"
+  },
+  "tags": [
+    "news",
+    "finance",
+    "russia",
+    "telegram",
+    "wildberries",
+    "ozon",
+    "moex",
+    "cbr",
+    "rosstat",
+    "x402",
+    "market-data"
+  ],
+  "x402scan": "https://www.x402scan.com/server/f96fbc84-8538-414c-a847-bcc948103f8d",
+  "repository": "https://github.com/Croomee/x402-markettwits-news"
+}
