@@ -1286,4 +1286,15 @@ app.get('/agents.json', async (req, res) => {
   }
 });
 
+app.get('/llms.txt', async (req, res) => {
+  try {
+    const filePath = path.join(__dirname, 'llms.txt');
+    const data = await readFile(filePath, 'utf8');
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.send(data);
+  } catch (err) {
+    res.status(404).send('llms.txt not found');
+  }
+});
+
 app.listen(PORT, HOST, () => console.log(`proxy=${describeProxy(proxyConfig())} x402-news listening on ${HOST}:${PORT} mode=${MODE} network=${NETWORK} facilitator=${FACILITATOR_TYPE} price=${PRICE} payTo=${PAY_TO || "-"} ingest=${INGEST_TOKEN ? "on" : "off"} parser=${parserConfigured() ? "on" : "off"} file=${NEWS_FILE}`));
