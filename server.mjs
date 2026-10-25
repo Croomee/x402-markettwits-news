@@ -24,7 +24,6 @@ import { parseTerms, matchesTerms, parseNumParam, isoSec, buildSummary, topTopic
 import { parseIsoDate, parseCodes, parseTicker, parseIndexCodes, getFx, getKeyRate, getQuote, getIndex, getMovers, getFuel } from "./ru-data.mjs";
 import { normalizeChannel, parseChannelList, channelLatest, channelSearch } from "./tg.mjs";
 import { readFile } from 'fs/promises';
-import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const HERE = path.dirname(fileURLToPath(import.meta.url));
