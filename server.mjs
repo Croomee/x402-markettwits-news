@@ -685,10 +685,9 @@ const PAID_ROUTES = [
     extraResponses: UPSTREAM_502("Fewer than 2 products returned a price (anti-bot, timeout, not found).") },
   { path: "/product/monitor", operationId: "monitorProductPrice", price: "$0.005", tags: ["product"],
     summary: "Price-target check for one product: is the current price at or below target_price?",
-    description: "Fetches one Wildberries/Ozon product (same live chain as /product/info) and compares it with target_price (RUB): below_target " +
-      "(current <= target and not out of stock), current_price, diff_abs/diff_percent, in_stock, the full product object and checked_at. Use it as a paid poll for price alerts. " +
-      "If the product is out of stock with no price it returns 200 with below_target false, current_price null, in_stock false and a note; " +
-      "if no product data can be fetched at all it returns 502 and the payment is not settled.",
+    description: "Fetches one Wildberries/Ozon product (live, as /product/info) and checks it against target_price (RUB). Returns below_target " +
+      "(current <= target and in stock), current_price, diff_abs/diff_percent, in_stock, product and checked_at. Out of stock: 200 with " +
+      "below_target false, current_price null. 502 (payment not settled) if no product data can be fetched.",
     params: { url: PRODUCT_URL_PARAM, target_price: TARGET_PRICE_PARAM }, required: ["url", "target_price"], badRequest: true,
     example: { url: "https://www.wildberries.ru/catalog/839226871/detail.aspx", target_price: "1500" },
     badRequestText: "url invalid/unsupported, or target_price missing, non-numeric, zero or negative. Returned before payment.",
@@ -700,10 +699,9 @@ const PAID_ROUTES = [
     extraResponses: UPSTREAM_502("No product data could be fetched (anti-bot, timeout, not found).") },
   { path: "/product/history", operationId: "getProductPriceHistory", price: "$0.004", tags: ["product"],
     summary: "Wildberries price history: weekly CDN points + observed + live price, min/max/avg, 30-day change",
-    description: "Price history for a Wildberries product: weekly points from WB's public price-history CDN (weekly_cdn), prices this service observed " +
-      "on earlier lookups (observed; in-memory, reset on restart), and the current live price (live). Returns points (oldest first), current, " +
-      "stats min/max/avg, change_30d (vs. the latest point at least 30 days old) and history_limited:true with a note when only the current price exists. " +
-      "Ozon has no public history (only live, currently blocked). 502 (not settled) only when no price at all is available.",
+    description: "Wildberries price history for url: weekly points from WB's price CDN, prices observed by this service and the live price. " +
+      "Returns points (oldest first), current, stats min/max/avg, change_30d, and history_limited when only the current price exists. " +
+      "Ozon: live price only. 502 (payment not settled) if no price is available.",
     params: { url: PRODUCT_URL_PARAM }, required: ["url"], badRequest: true,
     example: { url: "https://www.wildberries.ru/catalog/839226871/detail.aspx" },
     badRequestText: "url is not a valid http(s) URL, the host is not wildberries.ru/wb.ru/ozon.ru, or no product id could be extracted. Returned before payment.",
