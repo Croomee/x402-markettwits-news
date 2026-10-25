@@ -8,7 +8,7 @@ startCommand:
     properties:
       x402PrivateKey:
         type: string
-        description: Private key (0x + 64 hex) of a dedicated Base wallet holding a few USDC. Each tool call pays $0.0015-$0.01.
+        description: Private key (0x + 64 hex) of a dedicated Base wallet holding a few USDC. Each tool call pays $0.001-$0.005.
       maxPaymentUsd:
         type: number
         default: 0.02

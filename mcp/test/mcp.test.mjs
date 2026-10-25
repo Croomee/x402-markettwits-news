@@ -59,8 +59,8 @@ test("snapshot -> 27 tools with prices, unique names, required params", () => {
     assert.ok(t.description.includes(`$${t.price_usd} USDC`), t.name);
   }
   const byPath = Object.fromEntries(tools.map((t) => [t.path, t]));
-  assert.equal(byPath["/ru/fx"].price_usd, 0.0015);
-  assert.equal(byPath["/tg/search"].price_usd, 0.006);
+  assert.equal(byPath["/ru/fx"].price_usd, 0.001);
+  assert.equal(byPath["/tg/search"].price_usd, 0.003);
   assert.deepEqual(byPath["/tg/search"].params.filter((p) => p.required).map((p) => p.name), ["q", "channels"]);
   assert.equal(snakeCase("getCbrFxRates"), "get_cbr_fx_rates");
   assert.equal(buildUrl(BASE, "/ru/fx", { codes: "USD,EUR", date: undefined }), `${BASE}/ru/fx?codes=USD%2CEUR`);

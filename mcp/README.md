@@ -4,7 +4,7 @@ MCP server (stdio) for the pay-per-call **x402-markettwits-news** API: MarketTwi
 Russian market data (Bank of Russia FX and key rate, MOEX quotes, indices and movers, Rosstat fuel prices),
 public Telegram channels and Wildberries product prices.
 
-Every API endpoint is one MCP tool (27 tools). Each call costs a fixed **$0.0015–$0.01 in USDC on Base**, paid
+Every API endpoint is one MCP tool (27 tools). Each call costs a fixed **$0.001–$0.005 in USDC on Base**, paid
 automatically through [x402](https://x402.org) from a wallet you configure. Only successful responses are charged;
 invalid parameters (400), not found (404) and upstream failures (502) are free.
 
@@ -64,18 +64,18 @@ docker run -i --rm -e X402_PRIVATE_KEY x402-markettwits-mcp
 ## Tools
 | Tool | Endpoint | Price |
 |---|---|---|
-| `get_latest_news` / `get_important_news` / `search_news` | `/news/latest`, `/news/important`, `/news/search` | $0.003 |
-| `get_news_since` | `/news/since` (cursor polling) | $0.002 |
-| `check_news_alert` / `check_new_high_alert` | `/news/alerts/check`, `/news/alerts/new` | $0.004 / $0.005 |
-| `summarize_news` / `summarize_recent_news` | `/news/summary`, `/news/summary/recent` | $0.008 / $0.007 |
-| `get_top_topics` / `get_trending_topics` | `/news/top-topics`, `/news/topics/trending` | $0.005 / $0.004 |
-| `get_news_movers` / `get_country_news` | `/news/movers`, `/news/country` | $0.005 / $0.004 |
-| `get_data_surprises` / `get_news_sentiment` / `get_news_digest` | `/news/data-surprises`, `/news/sentiment`, `/news/digest` | $0.006 / $0.005 / $0.01 |
-| `get_cbr_fx_rates` / `get_cbr_key_rate` | `/ru/fx`, `/ru/key-rate` | $0.0015 |
-| `get_moex_quote` / `get_moex_index` / `get_moex_movers` | `/moex/quote`, `/moex/index`, `/moex/movers` (delayed ~15 min) | $0.003 / $0.003 / $0.004 |
-| `get_ru_fuel_prices` | `/ru/fuel` (Rosstat weekly) | $0.003 |
-| `get_telegram_channel_latest` / `search_telegram_channels` | `/tg/channel/latest`, `/tg/search` | $0.004 / $0.006 |
-| `get_product_info` / `compare_products` / `monitor_product_price` / `get_product_price_history` | `/product/*` (Wildberries) | $0.004 / $0.006 / $0.005 / $0.004 |
+| `get_latest_news` / `get_important_news` / `search_news` | `/news/latest`, `/news/important`, `/news/search` | $0.0015 |
+| `get_news_since` | `/news/since` (cursor polling) | $0.001 |
+| `check_news_alert` / `check_new_high_alert` | `/news/alerts/check`, `/news/alerts/new` | $0.002 / $0.0025 |
+| `summarize_news` / `summarize_recent_news` | `/news/summary`, `/news/summary/recent` | $0.004 / $0.0035 |
+| `get_top_topics` / `get_trending_topics` | `/news/top-topics`, `/news/topics/trending` | $0.0025 / $0.002 |
+| `get_news_movers` / `get_country_news` | `/news/movers`, `/news/country` | $0.0025 / $0.002 |
+| `get_data_surprises` / `get_news_sentiment` / `get_news_digest` | `/news/data-surprises`, `/news/sentiment`, `/news/digest` | $0.003 / $0.0025 / $0.005 |
+| `get_cbr_fx_rates` / `get_cbr_key_rate` | `/ru/fx`, `/ru/key-rate` | $0.001 |
+| `get_moex_quote` / `get_moex_index` / `get_moex_movers` | `/moex/quote`, `/moex/index`, `/moex/movers` (delayed ~15 min) | $0.0015 / $0.0015 / $0.002 |
+| `get_ru_fuel_prices` | `/ru/fuel` (Rosstat weekly) | $0.0015 |
+| `get_telegram_channel_latest` / `search_telegram_channels` | `/tg/channel/latest`, `/tg/search` | $0.002 / $0.003 |
+| `get_product_info` / `compare_products` / `monitor_product_price` / `get_product_price_history` | `/product/*` (Wildberries) | $0.002 / $0.003 / $0.0025 / $0.002 |
 
 Each tool returns JSON: `{ ok: true, endpoint, data, payment: { price_usd, transaction, payer, ... } }`, or
 `{ ok: false, error, ... }` with `isError: true`. The error codes are:

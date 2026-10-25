@@ -25,15 +25,15 @@ const opt = (f) => { const i = args.indexOf(f); return i >= 0 ? args[i + 1] : un
 
 // cheap endpoint groups; amount = expected atomic USDC price; check(body) -> null | problem
 export const GROUPS = [
-  { name: "cbr-fx", path: "/ru/fx?codes=USD", amount: "1500",
+  { name: "cbr-fx", path: "/ru/fx?codes=USD", amount: "1000",
     check: (b) => b?.rates?.[0]?.code === "USD" && b.rates[0].per_unit > 1 && b.rates[0].per_unit < 1000 ? null : "no sane USD rate" },
-  { name: "cbr-key-rate", path: "/ru/key-rate?months=1", amount: "1500",
+  { name: "cbr-key-rate", path: "/ru/key-rate?months=1", amount: "1000",
     check: (b) => typeof b?.rate === "number" && b.rate > 0 && b.rate < 100 && b.as_of ? null : "no sane key rate" },
-  { name: "news-since", path: "/news/since?id=0&limit=1", amount: "2000",
+  { name: "news-since", path: "/news/since?id=0&limit=1", amount: "1000",
     check: (b) => !Array.isArray(b?.items) ? "no items array" : b.items.length === 0 ? "news store is EMPTY (refill after a redeploy?)" : null },
-  { name: "moex-index", path: "/moex/index?code=IMOEX", amount: "3000",
+  { name: "moex-index", path: "/moex/index?code=IMOEX", amount: "1500",
     check: (b) => b?.items?.[0]?.code === "IMOEX" && b.items[0].value > 100 ? null : "no sane IMOEX value" },
-  { name: "tg-latest", path: "/tg/channel/latest?channel=markettwits&limit=1", amount: "4000",
+  { name: "tg-latest", path: "/tg/channel/latest?channel=markettwits&limit=1", amount: "2000",
     check: (b) => b?.items?.[0]?.id > 0 && b.items[0].link ? null : "no Telegram post" },
 ];
 

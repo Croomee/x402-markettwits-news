@@ -30,7 +30,7 @@
           "price": {
             "mode": "fixed",
             "currency": "USD",
-            "amount": "0.003"
+            "amount": "0.0015"
           },
           "protocols": [
             {
@@ -39,7 +39,7 @@
                 "scheme": "exact",
                 "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2",
                 "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-                "amount": "3000"
+                "amount": "1500"
               }
             }
           ]
@@ -71,7 +71,7 @@
           "price": {
             "mode": "fixed",
             "currency": "USD",
-            "amount": "0.003"
+            "amount": "0.0015"
           },
           "protocols": [
             {
@@ -80,7 +80,7 @@
                 "scheme": "exact",
                 "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2",
                 "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-                "amount": "3000"
+                "amount": "1500"
               }
             }
           ]
@@ -122,7 +122,7 @@
           "price": {
             "mode": "fixed",
             "currency": "USD",
-            "amount": "0.003"
+            "amount": "0.0015"
           },
           "protocols": [
             {
@@ -131,7 +131,7 @@
                 "scheme": "exact",
                 "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2",
                 "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-                "amount": "3000"
+                "amount": "1500"
               }
             }
           ]
@@ -173,7 +173,7 @@
           "price": {
             "mode": "fixed",
             "currency": "USD",
-            "amount": "0.004"
+            "amount": "0.002"
           },
           "protocols": [
             {
@@ -182,7 +182,7 @@
                 "scheme": "exact",
                 "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2",
                 "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-                "amount": "4000"
+                "amount": "2000"
               }
             }
           ]
@@ -224,7 +224,7 @@
           "price": {
             "mode": "fixed",
             "currency": "USD",
-            "amount": "0.008"
+            "amount": "0.004"
           },
           "protocols": [
             {
@@ -233,7 +233,7 @@
                 "scheme": "exact",
                 "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2",
                 "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-                "amount": "8000"
+                "amount": "4000"
               }
             }
           ]
@@ -265,7 +265,7 @@
           "price": {
             "mode": "fixed",
             "currency": "USD",
-            "amount": "0.005"
+            "amount": "0.0025"
           },
           "protocols": [
             {
@@ -274,7 +274,7 @@
                 "scheme": "exact",
                 "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2",
                 "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-                "amount": "5000"
+                "amount": "2500"
               }
             }
           ]
@@ -316,7 +316,7 @@
           "price": {
             "mode": "fixed",
             "currency": "USD",
-            "amount": "0.007"
+            "amount": "0.0035"
           },
           "protocols": [
             {
@@ -325,7 +325,7 @@
                 "scheme": "exact",
                 "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2",
                 "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-                "amount": "7000"
+                "amount": "3500"
               }
             }
           ]
@@ -367,7 +367,7 @@
           "price": {
             "mode": "fixed",
             "currency": "USD",
-            "amount": "0.005"
+            "amount": "0.0025"
           },
           "protocols": [
             {
@@ -376,7 +376,7 @@
                 "scheme": "exact",
                 "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2",
                 "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-                "amount": "5000"
+                "amount": "2500"
               }
             }
           ]
@@ -408,7 +408,7 @@
           "price": {
             "mode": "fixed",
             "currency": "USD",
-            "amount": "0.004"
+            "amount": "0.002"
           },
           "protocols": [
             {
@@ -417,7 +417,7 @@
                 "scheme": "exact",
                 "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2",
                 "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-                "amount": "4000"
+                "amount": "2000"
               }
             }
           ]
@@ -458,7 +458,7 @@
           "price": {
             "mode": "fixed",
             "currency": "USD",
-            "amount": "0.002"
+            "amount": "0.001"
           },
           "protocols": [
             {
@@ -467,7 +467,7 @@
                 "scheme": "exact",
                 "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2",
                 "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-                "amount": "2000"
+                "amount": "1000"
               }
             }
           ]
@@ -509,7 +509,7 @@
           "price": {
             "mode": "fixed",
             "currency": "USD",
-            "amount": "0.005"
+            "amount": "0.0025"
           },
           "protocols": [
             {
@@ -518,7 +518,7 @@
                 "scheme": "exact",
                 "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2",
                 "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-                "amount": "5000"
+                "amount": "2500"
               }
             }
           ]
@@ -574,7 +574,7 @@
           "price": {
             "mode": "fixed",
             "currency": "USD",
-            "amount": "0.004"
+            "amount": "0.002"
           },
           "protocols": [
             {
@@ -583,7 +583,7 @@
                 "scheme": "exact",
                 "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2",
                 "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-                "amount": "4000"
+                "amount": "2000"
               }
             }
           ]
@@ -625,7 +625,7 @@
           "price": {
             "mode": "fixed",
             "currency": "USD",
-            "amount": "0.006"
+            "amount": "0.003"
           },
           "protocols": [
             {
@@ -634,7 +634,7 @@
                 "scheme": "exact",
                 "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2",
                 "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-                "amount": "6000"
+                "amount": "3000"
               }
             }
           ]
@@ -676,7 +676,7 @@
           "price": {
             "mode": "fixed",
             "currency": "USD",
-            "amount": "0.005"
+            "amount": "0.0025"
           },
           "protocols": [
             {
@@ -685,7 +685,7 @@
                 "scheme": "exact",
                 "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2",
                 "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-                "amount": "5000"
+                "amount": "2500"
               }
             }
           ]
@@ -717,7 +717,7 @@
           "price": {
             "mode": "fixed",
             "currency": "USD",
-            "amount": "0.01"
+            "amount": "0.005"
           },
           "protocols": [
             {
@@ -726,7 +726,7 @@
                 "scheme": "exact",
                 "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2",
                 "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-                "amount": "10000"
+                "amount": "5000"
               }
             }
           ]
@@ -765,7 +765,7 @@
           "price": {
             "mode": "fixed",
             "currency": "USD",
-            "amount": "0.0015"
+            "amount": "0.001"
           },
           "protocols": [
             {
@@ -774,7 +774,7 @@
                 "scheme": "exact",
                 "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2",
                 "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-                "amount": "1500"
+                "amount": "1000"
               }
             }
           ]
@@ -806,7 +806,7 @@
           "price": {
             "mode": "fixed",
             "currency": "USD",
-            "amount": "0.0015"
+            "amount": "0.001"
           },
           "protocols": [
             {
@@ -815,7 +815,7 @@
                 "scheme": "exact",
                 "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2",
                 "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-                "amount": "1500"
+                "amount": "1000"
               }
             }
           ]
@@ -845,7 +845,7 @@
           "price": {
             "mode": "fixed",
             "currency": "USD",
-            "amount": "0.003"
+            "amount": "0.0015"
           },
           "protocols": [
             {
@@ -854,7 +854,7 @@
                 "scheme": "exact",
                 "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2",
                 "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-                "amount": "3000"
+                "amount": "1500"
               }
             }
           ]
@@ -885,7 +885,7 @@
           "price": {
             "mode": "fixed",
             "currency": "USD",
-            "amount": "0.003"
+            "amount": "0.0015"
           },
           "protocols": [
             {
@@ -894,7 +894,7 @@
                 "scheme": "exact",
                 "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2",
                 "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-                "amount": "3000"
+                "amount": "1500"
               }
             }
           ]
@@ -936,7 +936,7 @@
           "price": {
             "mode": "fixed",
             "currency": "USD",
-            "amount": "0.004"
+            "amount": "0.002"
           },
           "protocols": [
             {
@@ -945,7 +945,7 @@
                 "scheme": "exact",
                 "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2",
                 "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-                "amount": "4000"
+                "amount": "2000"
               }
             }
           ]
@@ -977,7 +977,7 @@
           "price": {
             "mode": "fixed",
             "currency": "USD",
-            "amount": "0.003"
+            "amount": "0.0015"
           },
           "protocols": [
             {
@@ -986,7 +986,7 @@
                 "scheme": "exact",
                 "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2",
                 "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-                "amount": "3000"
+                "amount": "1500"
               }
             }
           ]
@@ -1027,7 +1027,7 @@
           "price": {
             "mode": "fixed",
             "currency": "USD",
-            "amount": "0.004"
+            "amount": "0.002"
           },
           "protocols": [
             {
@@ -1036,7 +1036,7 @@
                 "scheme": "exact",
                 "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2",
                 "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-                "amount": "4000"
+                "amount": "2000"
               }
             }
           ]
@@ -1086,7 +1086,7 @@
           "price": {
             "mode": "fixed",
             "currency": "USD",
-            "amount": "0.006"
+            "amount": "0.003"
           },
           "protocols": [
             {
@@ -1095,7 +1095,7 @@
                 "scheme": "exact",
                 "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2",
                 "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-                "amount": "6000"
+                "amount": "3000"
               }
             }
           ]
@@ -1126,7 +1126,7 @@
           "price": {
             "mode": "fixed",
             "currency": "USD",
-            "amount": "0.004"
+            "amount": "0.002"
           },
           "protocols": [
             {
@@ -1135,7 +1135,7 @@
                 "scheme": "exact",
                 "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2",
                 "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-                "amount": "4000"
+                "amount": "2000"
               }
             }
           ]
@@ -1166,7 +1166,7 @@
           "price": {
             "mode": "fixed",
             "currency": "USD",
-            "amount": "0.006"
+            "amount": "0.003"
           },
           "protocols": [
             {
@@ -1175,7 +1175,7 @@
                 "scheme": "exact",
                 "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2",
                 "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-                "amount": "6000"
+                "amount": "3000"
               }
             }
           ]
@@ -1215,7 +1215,7 @@
           "price": {
             "mode": "fixed",
             "currency": "USD",
-            "amount": "0.005"
+            "amount": "0.0025"
           },
           "protocols": [
             {
@@ -1224,7 +1224,7 @@
                 "scheme": "exact",
                 "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2",
                 "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-                "amount": "5000"
+                "amount": "2500"
               }
             }
           ]
@@ -1255,7 +1255,7 @@
           "price": {
             "mode": "fixed",
             "currency": "USD",
-            "amount": "0.004"
+            "amount": "0.002"
           },
           "protocols": [
             {
@@ -1264,7 +1264,7 @@
                 "scheme": "exact",
                 "payTo": "0x2c257EE70952a16f00c99d40fDFF2d28f1A5b8A2",
                 "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-                "amount": "4000"
+                "amount": "2000"
               }
             }
           ]

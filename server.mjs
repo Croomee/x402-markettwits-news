@@ -1,9 +1,9 @@
 // x402-paid MarketTwits news API
 // Free:  GET / (service index + price list), GET /health, GET /news/sample, GET /openapi.json
 // Paid:  GET /news/latest?limit=N, /news/important, /news/search?q=   (x402 v2, exact scheme, PRICE each)
-//        GET /news/alerts/check ($0.004), /news/summary ($0.008), /news/top-topics ($0.005)
-//        GET /news/summary/recent ($0.007), /news/alerts/new ($0.005), /news/topics/trending ($0.004)
-//        GET /product/info?url= ($0.004)  Wildberries / Ozon product card (502 on upstream failure -> never settled)
+//        GET /news/alerts/check ($0.002), /news/summary ($0.004), /news/top-topics ($0.0025)
+//        GET /news/summary/recent ($0.0035), /news/alerts/new ($0.0025), /news/topics/trending ($0.002)
+//        GET /product/info?url= ($0.002)  Wildberries / Ozon product card (502 on upstream failure -> never settled)
 // Admin: POST /ingest  (Authorization: Bearer <INGEST_TOKEN>)
 import express from "express";
 import fs from "node:fs";
@@ -40,7 +40,7 @@ const CDP_API_KEY_SECRET = (process.env.CDP_API_KEY_SECRET || "").trim();
 const USE_CDP = Boolean(CDP_API_KEY_ID && CDP_API_KEY_SECRET);
 const FACILITATOR_TYPE = USE_CDP ? "cdp" : (FACILITATOR_URL.includes("x402.org") ? "x402.org" : "custom");
 const TESTNETS = new Set(["eip155:84532"]);
-const PRICE = process.env.PRICE || "$0.003";
+const PRICE = process.env.NEWS_PRICE || "$0.0015"; // was env PRICE ($0.003 pinned in the Render env); renamed so the code default applies
 const INGEST_TOKEN = (process.env.INGEST_TOKEN || "").trim();
 const MAX_ITEMS = 500;
 
@@ -453,14 +453,14 @@ const PAID_ROUTES = [
   { path: "/news/search", operationId: "searchNews", summary: "Keyword search in translated news (newest first)",
     description: "Case-insensitive keyword search in translated MarketTwits news (all words must match), limit 1-50",
     params: { q: Q_PARAM, limit: LIMIT_PARAM }, required: ["q"], example: { q: "oil", limit: 20 }, badRequest: true },
-  { path: "/news/alerts/check", operationId: "checkNewsAlert", price: "$0.004",
+  { path: "/news/alerts/check", operationId: "checkNewsAlert", price: "$0.002",
     summary: "Keyword alert check: how many matching items in the last N hours",
     description: "Count of news matching q (same matching as /news/search) published in the last N hours (1-168, default 24), plus the 5 most recent",
     params: { q: Q_PARAM, hours: HOURS_PARAM(24, 168) }, required: ["q"], example: { q: "oil", hours: 24 }, badRequest: true,
     outputSchema: ALERTS_OUTPUT_SCHEMA, ok200: "Alert check result (count 0 and items [] when nothing matched)",
     outputExample: { query: "oil", hours: 24, count: 1, since: "2026-10-19T12:20:00Z", latest_id: 389638, latest_published_at: EX_T,
       items: [EXAMPLE_ITEM] } },
-  { path: "/news/summary", operationId: "summarizeNews", price: "$0.008",
+  { path: "/news/summary", operationId: "summarizeNews", price: "$0.004",
     summary: "Short extractive English summary of the latest news on a keyword",
     description: "3-5 sentence extractive summary of the latest news matching q (limit 1-50, default 10): lead sentence + de-duplicated headlines, high-importance first",
     params: { q: Q_PARAM, limit: SUMMARY_LIMIT_PARAM }, required: ["q"], example: { q: "oil", limit: 10 }, badRequest: true,
@@ -468,14 +468,14 @@ const PAID_ROUTES = [
     outputExample: { query: "oil", count: 1, summary: `1 matching item for "oil" since 2026-10-20 12:20 UTC; 1 high-importance. ` +
       "Oil — API inventories: CRUDE = -4.931M (expected -1.3M / previous -11.12M). Most recent matching item published 2026-10-20 12:20 UTC.",
       items: [{ id: 389638, published_at: EX_T, importance: "high", source_url: "https://t.me/markettwits/389638" }] } },
-  { path: "/news/top-topics", operationId: "getTopTopics", price: "$0.005",
+  { path: "/news/top-topics", operationId: "getTopTopics", price: "$0.0025",
     summary: "Top 5 keywords/hashtags in high-importance news of the last N hours",
     description: "Top 5 topics (hashtags, names, keywords; counted once per item) across high-importance news of the last N hours (1-72, default 6)",
     params: { hours: HOURS_PARAM(6, 72) }, required: [], example: { hours: 6 }, badRequest: true,
     badRequestText: "hours is not a number. Returned before payment.",
     outputSchema: TOPICS_OUTPUT_SCHEMA, ok200: "Top topics",
     outputExample: { hours: 6, items_considered: 12, topics: [{ topic: "Ukraine", count: 7 }, { topic: "Iran", count: 4 }], fallback: false } },
-  { path: "/news/summary/recent", operationId: "summarizeRecentNews", price: "$0.007",
+  { path: "/news/summary/recent", operationId: "summarizeRecentNews", price: "$0.0035",
     summary: "Extractive English summary of news on a keyword from the last N hours",
     description: "3-5 sentence extractive summary of news matching q published in the last N hours (1-168, default 12; up to 50 items), " +
       "with high_count. Use for 'what happened with X today'.",
@@ -485,7 +485,7 @@ const PAID_ROUTES = [
       summary: `1 matching item for "Iran" since 2026-10-20 12:20 UTC; 1 high-importance. TRUMP: I HAVE TO MAKE A FINAL DECISION ON IRAN. ` +
         "Most recent matching item published 2026-10-20 12:20 UTC.",
       items: [{ id: 389638, published_at: EX_T, importance: "high", source_url: "https://t.me/markettwits/389638" }] } },
-  { path: "/news/alerts/new", operationId: "checkNewHighAlert", price: "$0.005",
+  { path: "/news/alerts/new", operationId: "checkNewHighAlert", price: "$0.0025",
     summary: "Is there new HIGH-importance news on a keyword in the last N hours?",
     description: "Checks only importance=high news matching q in the last N hours (1-168, default 6): has_new, count and the latest item. " +
       "Cheap poll for market-moving alerts on a topic/ticker.",
@@ -493,7 +493,7 @@ const PAID_ROUTES = [
     outputSchema: ALERTS_NEW_OUTPUT_SCHEMA, ok200: "Alert result (has_new false, count 0, latest null when nothing matched)",
     outputExample: { query: "oil", hours: 6, since: "2026-10-20T06:20:00Z", has_new: true, count: 1,
       latest: { id: 389638, published_at: EX_T, text_en: EXAMPLE_ITEM.text_en, source_url: EXAMPLE_ITEM.source_url } } },
-  { path: "/news/topics/trending", operationId: "getTrendingTopics", price: "$0.004",
+  { path: "/news/topics/trending", operationId: "getTrendingTopics", price: "$0.002",
     summary: "Trending topics in high-importance news with change vs. the previous window",
     description: "Top 5 topics (hashtags, names, keywords; counted once per item) in high-importance news of the last N hours (1-72, default 6), " +
       "each with prev_count in the previous equal-length window, change = count - prev_count, and latest_id/latest_source_url",
@@ -502,7 +502,7 @@ const PAID_ROUTES = [
     outputSchema: TRENDING_OUTPUT_SCHEMA, ok200: "Trending topics",
     outputExample: { hours: 6, items_considered: 12, fallback: false, topics: [{ topic: "Iran", count: 6, prev_count: 2, change: 4,
       latest_id: 389638, latest_source_url: "https://t.me/markettwits/389638" }] } },
-  { path: "/news/since", operationId: "getNewsSince", price: "$0.002",
+  { path: "/news/since", operationId: "getNewsSince", price: "$0.001",
     summary: "Incremental feed: items newer than the id you already have (cursor polling)",
     description: "All stored items with id > id (oldest first, up to limit 1-100, default 50) plus next_id/has_more for the next call. " +
       "The cheapest way for a bot to poll without duplicates: keep next_id and pass it back.",
@@ -511,7 +511,7 @@ const PAID_ROUTES = [
     outputSchema: SINCE_OUTPUT_SCHEMA, ok200: "Items newer than id (count 0 and next_id = id when nothing new)",
     outputExample: { since_id: 389850, count: 1, has_more: false, next_id: 389858, latest_id: 389858,
       items: [{ id: 389858, source_url: "https://t.me/markettwits/389858", published_at: "2026-10-21T15:40:00Z", importance: "high", text_en: "⬆️🇷🇺#KLVZ = +16% PUTIN AND WITKOFF HAD A SUBSTANTIVE CONVERSATION - PESKOV" }] } },
-  { path: "/news/movers", operationId: "getNewsMovers", price: "$0.005",
+  { path: "/news/movers", operationId: "getNewsMovers", price: "$0.0025",
     summary: "Top gainers/losers reported in the news ('#TICKER = ±X%')",
     description: "Parses '#TICKER [Name] = ±X%' price-move mentions (stocks, indices, crypto; RU/US/... from the flag) in news of the last N hours " +
       "(1-72, default 6), newest mention per ticker, |move| >= min_pct (default 0): top 10 gainers and top 10 losers with the source item.",
@@ -521,7 +521,7 @@ const PAID_ROUTES = [
     outputExample: { hours: 6, min_pct: 2, since: "2026-10-21T10:00:00Z", tickers_found: 3,
       gainers: [{ ticker: "KLVZ", name: null, pct: 16, country: "RU", id: 389858, published_at: "2026-10-21T15:40:00Z", importance: "high", source_url: "https://t.me/markettwits/389858", headline: "KLVZ = +16%: PUTIN AND WITKOFF HAD A SUBSTANTIVE CONVERSATION - PESKOV" }],
       losers: [{ ticker: "NFLX", name: "Netflix", pct: -6, country: "US", id: 389768, published_at: "2026-10-21T06:10:00Z", importance: "medium", source_url: "https://t.me/markettwits/389768", headline: "After-hours moves following earnings: SPCX SpaceX = +8%" }] } },
-  { path: "/news/country", operationId: "getCountryNews", price: "$0.004",
+  { path: "/news/country", operationId: "getCountryNews", price: "$0.002",
     summary: "News about one country (flag emoji + country keywords) with counts and top topics",
     description: "Items of the last N hours (1-168, default 24; importance all|high|medium|low) that carry the country's flag emoji or mention it " +
       "(e.g. RU: Russia/Kremlin/Bank of Russia/MOEX; US: USA/Fed/White House): count, high_count, share_of_window, top_topics and the 10 latest headlines.",
@@ -530,7 +530,7 @@ const PAID_ROUTES = [
     outputSchema: COUNTRY_OUTPUT_SCHEMA, ok200: "Country news (count 0 when nothing matched)",
     outputExample: { code: "RU", flag: "🇷🇺", hours: 24, importance: "all", since: "2026-10-20T16:00:00Z", count: 112, high_count: 31, by_flag: 93,
       share_of_window: 49.1, top_topics: [{ topic: "Russia", count: 40 }], latest: [EX_BRIEF] } },
-  { path: "/news/data-surprises", operationId: "getDataSurprises", price: "$0.006",
+  { path: "/news/data-surprises", operationId: "getDataSurprises", price: "$0.003",
     summary: "Macro data and earnings vs. expectations: actual, expected, previous, surprise",
     description: "Parses releases like 'US Pending Home Sales (Sep) = -7.3% m/m (exp. -0.5% / prev. +0.3%)' and earnings lines like " +
       "'3Q REV. $14.58B, EST. $12.87B' from news of the last N hours (1-168, default 24; optional q filter): indicator, actual, expected, previous, unit, " +
@@ -541,7 +541,7 @@ const PAID_ROUTES = [
     outputExample: { hours: 24, query: null, since: "2026-10-20T16:00:00Z", count: 1, above: 1, below: 0, items: [{ kind: "macro",
       indicator: "UK - CONSUMER PRICE INFLATION CPI (Sep) — y/y", actual: 3.5, expected: 3.4, previous: 3.1, unit: "%", surprise: 0.1, surprise_pct: 2.9,
       direction: "above", id: 389757, published_at: "2026-10-21T06:00:00Z", importance: "high", source_url: "https://t.me/markettwits/389757" }] } },
-  { path: "/news/sentiment", operationId: "getNewsSentiment", price: "$0.005",
+  { path: "/news/sentiment", operationId: "getNewsSentiment", price: "$0.0025",
     summary: "Heuristic bullish/bearish tone of news on a keyword (lexicon, not a model)",
     description: "Scores each item matching q in the last N hours (1-168, default 24) with a keyword/emoji lexicon (rise/beat/upgrade vs. fall/miss/sanctions, " +
       "⬆️/⬇️) plus explicit '= ±X%' moves, and returns bullish/bearish/neutral counts, score = (bullish - bearish)/count in [-1, 1], a label and examples. " +
@@ -550,7 +550,7 @@ const PAID_ROUTES = [
     outputSchema: SENTIMENT_OUTPUT_SCHEMA, ok200: "Sentiment (label no_data when nothing matched)",
     outputExample: { query: "SpaceX", hours: 24, since: "2026-10-20T16:00:00Z", count: 6, bullish: 4, bearish: 1, neutral: 1, score: 0.5, label: "bullish",
       method: "heuristic", note: "Heuristic keyword/emoji lexicon plus explicit '= ±X%' moves; not a language model.", examples: { bullish: [{ ...EX_BRIEF, score: 1 }], bearish: [] } } },
-  { path: "/news/digest", operationId: "getNewsDigest", price: "$0.01",
+  { path: "/news/digest", operationId: "getNewsDigest", price: "$0.005",
     summary: "Sectioned briefing: central banks, macro, energy, equities, crypto, geopolitics",
     description: "Groups news of the last N hours (1-48, default 24) into central_banks, macro, energy, equities, crypto and geopolitics by keyword rules " +
       "(an item may appear in several), each with count, high_count and up to 5 headlines (high first, then newest), plus top_topics of high items.",
@@ -559,7 +559,7 @@ const PAID_ROUTES = [
     outputSchema: DIGEST_OUTPUT_SCHEMA, ok200: "Digest",
     outputExample: { hours: 24, since: "2026-10-20T16:00:00Z", count: 228, high_count: 70, unclassified_count: 54,
       sections: { equities: { count: 28, high_count: 7, items: [EX_BRIEF] } }, top_topics: [{ topic: "Ukraine", count: 12 }] } },
-  { path: "/ru/fx", operationId: "getCbrFxRates", price: "$0.0015", tags: ["ru-data"],
+  { path: "/ru/fx", operationId: "getCbrFxRates", price: "$0.001", tags: ["ru-data"],
     summary: "Official Bank of Russia FX rates (RUB) with day-over-day change",
     description: "CBR official exchange rates from cbr.ru XML_daily.asp for a date (default: the latest set) and optional currency codes: " +
       "per currency nominal, value (RUB per nominal), per_unit (RUB per 1 unit), previous set's per_unit, change and change_pct. Cached 30 min (past dates 7 days).",
@@ -571,7 +571,7 @@ const PAID_ROUTES = [
         { code: "CNY", name: "Юань", nominal: 1, value: 12.2806, per_unit: 12.2806, prev_per_unit: 12.3708, change: -0.0902, change_pct: -0.729 }],
       missing: [], note: "Official CBR rate", via: "direct", cached: false, fetched_at: "2026-10-22T03:51:31Z" },
     extraResponses: DATA_502("cbr.ru") },
-  { path: "/ru/key-rate", operationId: "getCbrKeyRate", price: "$0.0015", tags: ["ru-data"],
+  { path: "/ru/key-rate", operationId: "getCbrKeyRate", price: "$0.001", tags: ["ru-data"],
     summary: "Bank of Russia key rate: current level, since when, and recent changes",
     description: "Current CBR key rate (% p.a.) from the cbr.ru DailyInfo web service (KeyRateXML; the hd_base/KeyRate page as fallback): rate, as_of, " +
       "effective_since, previous_rate, last_change_bp and every change in the last `months` (default 24) newest first, plus min/max in the window. Cached 3 h.",
@@ -581,7 +581,7 @@ const PAID_ROUTES = [
       previous_rate: 14.25, last_change_bp: -25, months: 24, changes: [{ date: "2026-07-27", rate: 14, prev_rate: 14.25, change_bp: -25 }],
       max_in_window: 21, min_in_window: 14, via: "direct", cached: false, fetched_at: "2026-10-22T03:51:31Z" },
     extraResponses: DATA_502("cbr.ru") },
-  { path: "/moex/quote", operationId: "getMoexQuote", price: "$0.003", tags: ["ru-data"],
+  { path: "/moex/quote", operationId: "getMoexQuote", price: "$0.0015", tags: ["ru-data"],
     summary: "Moscow Exchange stock quote (delayed ~15 min): price, change, volume, bid/offer",
     description: "One MOEX shares-market ticker from MOEX ISS (main board TQBR when listed): price (last trade, or previous close before the session's first trade), " +
       "change/change_pct vs previous close, open/high/low, bid/offer, volume, value_rub, market cap, trading status. Data is delayed ~15 minutes (delayed: true). Unknown ticker -> 404 (not settled).",
@@ -593,7 +593,7 @@ const PAID_ROUTES = [
       volume: 4100000, value_rub: 1198000000, num_trades: 21000, trading_status: "T", updated_at: "2026-10-22T11:05:00+03:00", trade_date: "2026-10-22",
       delayed: true, delay_minutes: 15, source: "MOEX ISS (iss.moex.com)", cached: false, fetched_at: "2026-10-22T08:20:00Z" },
     extraResponses: { ...NOT_FOUND_404("Ticker not found on the MOEX shares market."), ...DATA_502("iss.moex.com") } },
-  { path: "/moex/index", operationId: "getMoexIndex", price: "$0.003", tags: ["ru-data"],
+  { path: "/moex/index", operationId: "getMoexIndex", price: "$0.0015", tags: ["ru-data"],
     summary: "MOEX index values (IMOEX, RTSI, sector indices) or the index catalogue",
     description: "Index level, change/change_pct vs previous close, open/high/low, month/year change, annual high/low and traded value for up to 5 codes " +
       "(default IMOEX), or code=list for the catalogue of MOEX stock indices (SNDX board + RTS*). Delayed ~15 minutes. Unknown codes -> 404 (not settled).",
@@ -605,7 +605,7 @@ const PAID_ROUTES = [
       value_traded_rub: 87708483202, currency: "RUB", trade_date: "2026-10-21", updated_at: "2026-10-21T23:50:03+03:00" }], missing: [],
       source: "MOEX ISS (iss.moex.com)", delayed: true, delay_minutes: 15, cached: false, fetched_at: "2026-10-22T03:51:31Z" },
     extraResponses: { ...NOT_FOUND_404("Index code not found."), ...DATA_502("iss.moex.com") } },
-  { path: "/moex/movers", operationId: "getMoexMovers", price: "$0.004", tags: ["ru-data"],
+  { path: "/moex/movers", operationId: "getMoexMovers", price: "$0.002", tags: ["ru-data"],
     summary: "Top gainers and losers on the Moscow Exchange main board (TQBR), with market breadth",
     description: "Ranks TQBR shares by change vs previous close (turnover >= min_value RUB, default 5 mln): top `limit` gainers and losers (default 10, max 50), " +
       "advancers/decliners/unchanged. Before the session's first trades (mode previous_session) it ranks the last completed session from ISS history. Delayed ~15 minutes.",
@@ -617,7 +617,7 @@ const PAID_ROUTES = [
       losers: [{ ticker: "AFKS", name: "Система ао", price: 7.828, pct: -2.13, value: 1062601090, trade_date: "2026-10-21" }],
       delayed: true, delay_minutes: 15, source: "MOEX ISS (iss.moex.com), board TQBR (main shares board)", cached: false, fetched_at: "2026-10-22T03:51:31Z" },
     extraResponses: DATA_502("iss.moex.com") },
-  { path: "/ru/fuel", operationId: "getRuFuelPrices", price: "$0.003", tags: ["ru-data"],
+  { path: "/ru/fuel", operationId: "getRuFuelPrices", price: "$0.0015", tags: ["ru-data"],
     summary: "Russian retail fuel prices (AI-92/95/98, diesel) — Rosstat weekly averages",
     description: "Average retail pump prices across Russia from Rosstat's weekly release (rosstat.gov.ru nedel_sred_cen.xlsx): price (RUB/l), as_of, week-over-week change, " +
       "4-week and year-to-date change and `weeks` of history per fuel. Rosstat publishes weekly (usually Wednesday, prices as of Monday); cached 6 h, a stale copy (stale: true) " +
@@ -630,7 +630,7 @@ const PAID_ROUTES = [
         change: -0.01, change_pct: -0.01, change_4w_pct: 0.15, change_ytd_pct: 20.38, history: [{ date: "2026-10-12", price: 74.71 }, { date: "2026-10-05", price: 74.72 }] }],
       note: "Rosstat publishes weekly", via: "direct", cached: false, fetched_at: "2026-10-22T03:51:31Z" },
     extraResponses: DATA_502("rosstat.gov.ru") },
-  { path: "/tg/channel/latest", operationId: "getTelegramChannelLatest", price: "$0.004", tags: ["telegram"],
+  { path: "/tg/channel/latest", operationId: "getTelegramChannelLatest", price: "$0.002", tags: ["telegram"],
     summary: "Latest posts of a public Telegram channel (text, date, views, link)",
     description: "Reads the public web preview t.me/s/<channel> (no login): newest `limit` posts (default 20, max 50) with id, date, text (HTML stripped, emoji kept), " +
       "views, link, media types and channel title/subscribers. Channels without a public preview or that do not exist -> 404 (not settled). Cached 2 min.",
@@ -641,7 +641,7 @@ const PAID_ROUTES = [
       items: [{ id: 389929, channel: "markettwits", date: "2026-10-21T19:19:52+00:00", text: "⚠️🇺🇸#META #spo #ии\nMeta ... — Semafor", views: 39000, views_raw: "39K",
         link: "https://t.me/markettwits/389929", media: [], edited: true }], source: "https://t.me/s/markettwits (public web preview)", cached: false, fetched_at: "2026-10-22T03:51:36Z" },
     extraResponses: { ...NOT_FOUND_404("Channel not found or no public web preview."), ...DATA_502("t.me") } },
-  { path: "/tg/search", operationId: "searchTelegramChannels", price: "$0.006", tags: ["telegram"],
+  { path: "/tg/search", operationId: "searchTelegramChannels", price: "$0.003", tags: ["telegram"],
     summary: "Search up to 5 public Telegram channels for a keyword",
     description: "Runs Telegram's own channel search (t.me/s/<channel>?q=) on 1-5 public channels, merges the matches newest first (up to `limit`, default 20) " +
       "with per-channel counts/errors. 404 when no channel exists, 502 when all fail; partial failures are reported in per_channel.",
@@ -653,7 +653,7 @@ const PAID_ROUTES = [
       per_channel: [{ channel: "markettwits", title: "MarketTwits", count: 20 }, { channel: "rbc_news", title: "РБК. Новости. Главное", count: 20 }],
       source: "https://t.me/s/<channel>?q= (public web preview)", fetched_at: "2026-10-22T03:51:36Z" },
     extraResponses: { ...NOT_FOUND_404("None of the channels exist / have a public preview."), ...DATA_502("t.me") } },
-  { path: "/product/info", operationId: "getProductInfo", price: "$0.004", tags: ["product"],
+  { path: "/product/info", operationId: "getProductInfo", price: "$0.002", tags: ["product"],
     summary: "Wildberries / Ozon product card: title, price (RUB), rating, reviews, stock",
     description: "Live product data for a Wildberries (wildberries.ru, wb.ru) or Ozon (ozon.ru) product URL: title, current price in RUB " +
       "(original_amount = list price before discount when known), rating, reviews_count and availability. Cached 10 min per product. " +
@@ -668,7 +668,7 @@ const PAID_ROUTES = [
     extraResponses: { 502: { description: "Marketplace blocked or failed (anti-bot, timeout, product not found). The x402 payment is not settled.",
       content: { "application/json": { schema: { type: "object", required: ["error"], properties: {
         error: { type: "string", enum: ["upstream_unavailable"] }, detail: { type: "string" } } } } } } } },
-  { path: "/product/compare", operationId: "compareProducts", price: "$0.006", tags: ["product"],
+  { path: "/product/compare", operationId: "compareProducts", price: "$0.003", tags: ["product"],
     summary: "Compare 2-5 Wildberries products: prices, cheapest, price spread, stock",
     description: `Fetches 2-${COMPARE_MAX} product URLs (urls=comma-separated, or repeated url=) with the same live chain as /product/info and returns ` +
       "per-item title/price/original_price/in_stock/rating/reviews_count, the cheapest and most expensive item, price_diff (abs RUB and percent of the cheapest), " +
@@ -686,7 +686,7 @@ const PAID_ROUTES = [
       most_expensive: { product_id: "1256886607", url: "https://www.wildberries.ru/catalog/1256886607/detail.aspx", title: "Наушники беспроводные A.Pods Pro 2", price: 680 },
       price_diff: { abs: 62, percent: 10.03 }, in_stock_count: 2, all_in_stock: true, currency: "RUB", fetched_at: "2026-10-21T16:30:00Z" },
     extraResponses: UPSTREAM_502("Fewer than 2 products returned a price (anti-bot, timeout, not found).") },
-  { path: "/product/monitor", operationId: "monitorProductPrice", price: "$0.005", tags: ["product"],
+  { path: "/product/monitor", operationId: "monitorProductPrice", price: "$0.0025", tags: ["product"],
     summary: "Price-target check for one product: is the current price at or below target_price?",
     description: "Fetches one Wildberries/Ozon product (live, as /product/info) and checks it against target_price (RUB). Returns below_target " +
       "(current <= target and in stock), current_price, diff_abs/diff_percent, in_stock, product and checked_at. Out of stock: 200 with " +
@@ -700,7 +700,7 @@ const PAID_ROUTES = [
       diff_abs: 92, diff_percent: 6.13, in_stock: true,
       product: { source: "wildberries", product_id: "839226871", title: "Наушники беспроводные TWS Pro 2", price: { amount: 1592, currency: "RUB", original_amount: 2525 } } },
     extraResponses: UPSTREAM_502("No product data could be fetched (anti-bot, timeout, not found).") },
-  { path: "/product/history", operationId: "getProductPriceHistory", price: "$0.004", tags: ["product"],
+  { path: "/product/history", operationId: "getProductPriceHistory", price: "$0.002", tags: ["product"],
     summary: "Wildberries price history: weekly CDN points + observed + live price, min/max/avg, 30-day change",
     description: "Wildberries price history for url: weekly points from WB's price CDN, prices observed by this service and the live price. " +
       "Returns points (oldest first), current, stats min/max/avg, change_30d, and history_limited when only the current price exists. " +
@@ -778,39 +778,39 @@ app.get("/openapi.json", async (req, res) => {
         `An unpaid call returns HTTP 402 with a PAYMENT-REQUIRED header (base64 x402 v2 challenge); pay with an x402 client ` +
         `(e.g. @x402/fetch) and retry. Invalid q (empty or >100 chars) returns 400 before any payment; no match returns 200 with items []. ` +
         `Response: {count, items:[{id, source_url, published_at, importance, text_en, posted_to_x, buffer_post_id}]}. ` +
-        `Analytics endpoints (fixed prices): GET /news/alerts/check?q=WORDS&hours=24 ($0.004) - count of matching items in the last N hours ` +
-        `(1-168) plus the 5 most recent, use for keyword alerts; GET /news/summary?q=WORDS&limit=10 ($0.008) - 3-5 sentence extractive ` +
-        `English summary of the latest matching news (limit 1-50); GET /news/top-topics?hours=6 ($0.005) - top 5 hashtags/keywords in ` +
+        `Analytics endpoints (fixed prices): GET /news/alerts/check?q=WORDS&hours=24 ($0.002) - count of matching items in the last N hours ` +
+        `(1-168) plus the 5 most recent, use for keyword alerts; GET /news/summary?q=WORDS&limit=10 ($0.004) - 3-5 sentence extractive ` +
+        `English summary of the latest matching news (limit 1-50); GET /news/top-topics?hours=6 ($0.0025) - top 5 hashtags/keywords in ` +
         `high-importance news of the last N hours (1-72; falls back to the last 20 high items, fallback=true). ` +
-        `GET /news/summary/recent?q=WORDS&hours=12 ($0.007) - like /news/summary but only items from the last N hours (1-168, up to 50), ` +
-        `returns {query, hours, since, count, high_count, summary, items}; GET /news/alerts/new?q=WORDS&hours=6 ($0.005) - only ` +
+        `GET /news/summary/recent?q=WORDS&hours=12 ($0.0035) - like /news/summary but only items from the last N hours (1-168, up to 50), ` +
+        `returns {query, hours, since, count, high_count, summary, items}; GET /news/alerts/new?q=WORDS&hours=6 ($0.0025) - only ` +
         `HIGH-importance matches in the last N hours (1-168), returns {has_new, count, latest}, use as a cheap alert poll; ` +
-        `GET /news/topics/trending?hours=6 ($0.004) - top 5 topics in high news of the last N hours (1-72) with prev_count, ` +
+        `GET /news/topics/trending?hours=6 ($0.002) - top 5 topics in high news of the last N hours (1-72) with prev_count, ` +
         `change (vs. the previous equal window) and latest_id. Non-numeric hours/limit returns 400 before payment. ` +
-        `More news endpoints: GET /news/since?id=LAST_ID&limit=50 ($0.002) - items with id > LAST_ID oldest first + next_id/has_more (cheap polling cursor); ` +
-        `GET /news/movers?hours=6&min_pct=2 ($0.005) - top gainers/losers parsed from '#TICKER = ±X%' mentions; ` +
-        `GET /news/country?code=RU&hours=24&importance=all ($0.004) - news about a country (flag emoji + keywords) with counts, top topics, 10 latest headlines; ` +
-        `GET /news/data-surprises?hours=24&q=CPI ($0.006) - macro releases and earnings vs. expectations (actual, expected, previous, surprise, direction); ` +
-        `GET /news/sentiment?q=WORDS&hours=24 ($0.005) - heuristic lexicon tone: bullish/bearish/neutral counts and score in [-1,1] (method: heuristic); ` +
-        `GET /news/digest?hours=24 ($0.01) - sectioned briefing (central_banks, macro, energy, equities, crypto, geopolitics) with up to 5 headlines each. ` +
-        `Russian market data: GET /ru/fx?codes=USD,EUR&date=YYYY-MM-DD ($0.0015) - official CBR rates (RUB per unit) with change vs the previous set; ` +
-        `GET /ru/key-rate?months=24 ($0.0015) - CBR key rate, effective_since, previous rate and the list of changes; ` +
-        `GET /moex/quote?ticker=SBER ($0.003) - Moscow Exchange quote (price, change_pct, OHLC, volume, bid/offer), delayed ~15 min; ` +
-        `GET /moex/index?code=IMOEX ($0.003) - index level/change for up to 5 codes (IMOEX, RTSI, ...) or code=list; ` +
-        `GET /moex/movers?limit=10 ($0.004) - top TQBR gainers/losers and breadth (previous session before the open); ` +
-        `GET /ru/fuel?weeks=4 ($0.003) - Rosstat weekly average pump prices AI-92/95/98 and diesel (RUB/l, as_of, weekly/4-week/YTD change). ` +
-        `Telegram: GET /tg/channel/latest?channel=NAME&limit=20 ($0.004) - newest posts of a public channel (id, date, text, views, link); ` +
-        `GET /tg/search?q=WORDS&channels=a,b ($0.006) - keyword search across up to 5 public channels. Upstream failures return 502 and unknown ticker/index/channel 404, ` +
+        `More news endpoints: GET /news/since?id=LAST_ID&limit=50 ($0.001) - items with id > LAST_ID oldest first + next_id/has_more (cheap polling cursor); ` +
+        `GET /news/movers?hours=6&min_pct=2 ($0.0025) - top gainers/losers parsed from '#TICKER = ±X%' mentions; ` +
+        `GET /news/country?code=RU&hours=24&importance=all ($0.002) - news about a country (flag emoji + keywords) with counts, top topics, 10 latest headlines; ` +
+        `GET /news/data-surprises?hours=24&q=CPI ($0.003) - macro releases and earnings vs. expectations (actual, expected, previous, surprise, direction); ` +
+        `GET /news/sentiment?q=WORDS&hours=24 ($0.0025) - heuristic lexicon tone: bullish/bearish/neutral counts and score in [-1,1] (method: heuristic); ` +
+        `GET /news/digest?hours=24 ($0.005) - sectioned briefing (central_banks, macro, energy, equities, crypto, geopolitics) with up to 5 headlines each. ` +
+        `Russian market data: GET /ru/fx?codes=USD,EUR&date=YYYY-MM-DD ($0.001) - official CBR rates (RUB per unit) with change vs the previous set; ` +
+        `GET /ru/key-rate?months=24 ($0.001) - CBR key rate, effective_since, previous rate and the list of changes; ` +
+        `GET /moex/quote?ticker=SBER ($0.0015) - Moscow Exchange quote (price, change_pct, OHLC, volume, bid/offer), delayed ~15 min; ` +
+        `GET /moex/index?code=IMOEX ($0.0015) - index level/change for up to 5 codes (IMOEX, RTSI, ...) or code=list; ` +
+        `GET /moex/movers?limit=10 ($0.002) - top TQBR gainers/losers and breadth (previous session before the open); ` +
+        `GET /ru/fuel?weeks=4 ($0.0015) - Rosstat weekly average pump prices AI-92/95/98 and diesel (RUB/l, as_of, weekly/4-week/YTD change). ` +
+        `Telegram: GET /tg/channel/latest?channel=NAME&limit=20 ($0.002) - newest posts of a public channel (id, date, text, views, link); ` +
+        `GET /tg/search?q=WORDS&channels=a,b ($0.003) - keyword search across up to 5 public channels. Upstream failures return 502 and unknown ticker/index/channel 404, ` +
         `neither is settled; invalid parameters return 400 before payment. ` +
-        `Marketplace endpoint: GET /product/info?url=PRODUCT_URL ($0.004) - live Wildberries (wildberries.ru/wb.ru /catalog/<id>/) or ` +
+        `Marketplace endpoint: GET /product/info?url=PRODUCT_URL ($0.002) - live Wildberries (wildberries.ru/wb.ru /catalog/<id>/) or ` +
         `Ozon (ozon.ru /product/<slug>-<id>/) product data {source, product_id, title, price:{amount, currency:'RUB', original_amount?}, ` +
         `rating, reviews_count, availability, in_stock}; a bad or foreign url returns 400 before payment, and if the marketplace ` +
         `blocks/fails it returns 502 upstream_unavailable without settling the payment. ` +
-        `GET /product/compare?urls=URL1,URL2[,...] ($0.006) - 2-${COMPARE_MAX} products (or repeat url=): items with price/original_price/in_stock/rating, ` +
+        `GET /product/compare?urls=URL1,URL2[,...] ($0.003) - 2-${COMPARE_MAX} products (or repeat url=): items with price/original_price/in_stock/rating, ` +
         `cheapest, most_expensive, price_diff {abs, percent}, in_stock_count, all_in_stock; per-item errors allowed, 502 if fewer than 2 priced. ` +
-        `GET /product/monitor?url=URL&target_price=RUB ($0.005) - below_target (current <= target and not out of stock), current_price, diff_abs/diff_percent, in_stock; ` +
+        `GET /product/monitor?url=URL&target_price=RUB ($0.0025) - below_target (current <= target and not out of stock), current_price, diff_abs/diff_percent, in_stock; ` +
         `out-of-stock without a price -> 200 below_target:false current_price:null. ` +
-        `GET /product/history?url=URL ($0.004) - Wildberries weekly CDN price points + observed + live price, min/max/avg, change_30d, ` +
+        `GET /product/history?url=URL ($0.002) - Wildberries weekly CDN price points + observed + live price, min/max/avg, change_30d, ` +
         `history_limited when only the current price exists. Wildberries works via a headless-browser parser; Ozon is currently blocked (502, not charged). ` +
         `Free: GET / (service index with the full price list), GET /news/sample (one truncated item), GET /health.`,
       contact: { email: "whale2003@proton.me" },

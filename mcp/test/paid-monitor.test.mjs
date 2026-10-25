@@ -11,7 +11,7 @@ import { generatePrivateKey } from "viem/accounts";
 
 const SCRIPT = new URL("../../scripts/paid-monitor.mjs", import.meta.url).pathname;
 const CHALLENGE = JSON.parse(fs.readFileSync(new URL("./fixtures/challenge-ru-fx.json", import.meta.url), "utf8"));
-const PRICES = { "/ru/fx": "1500", "/ru/key-rate": "1500", "/news/since": "2000", "/moex/index": "3000", "/tg/channel/latest": "4000" };
+const PRICES = { "/ru/fx": "1000", "/ru/key-rate": "1000", "/news/since": "1000", "/moex/index": "1500", "/tg/channel/latest": "2000" };
 const BODIES = {
   "/ru/fx": { rates: [{ code: "USD", per_unit: 81.97 }] }, "/ru/key-rate": { rate: 14, as_of: "2026-10-21" },
   "/news/since": { items: [{ id: 1 }] }, "/moex/index": { items: [{ code: "IMOEX", value: 2447 }] }, "/tg/channel/latest": { items: [{ id: 5, link: "https://t.me/x/5" }] },
@@ -61,7 +61,7 @@ test("paid monitor: success, failure alert (Telegram + log + exit 1), recovery, 
 
   const a = await run(["--group", "cbr-fx"], env(ok));
   assert.equal(a.code, 0, a.err);
-  assert.deepEqual([a.line.ok, a.line.status, a.line.price_usd, a.line.onchain, a.line.balance_usdc], [true, 200, 0.0015, "success", 0.3]);
+  assert.deepEqual([a.line.ok, a.line.status, a.line.price_usd, a.line.onchain, a.line.balance_usdc], [true, 200, 0.001, "success", 0.3]);
   assert.match(a.line.tx, /^0x(cd){32}$/);
   assert.equal(ok.seen.tg.length, 0, "no alert on success");
 

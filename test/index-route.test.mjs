@@ -58,9 +58,9 @@ test("GET / is free JSON with 27 prices from the paid route table; paid routes s
   assert.equal(body.prices.length, 27);
   assert.equal(body.paid_endpoints, 27);
   const byPath = Object.fromEntries(body.prices.map((p) => [p.path, p]));
-  assert.equal(byPath["/ru/fx"].price_usd, "0.0015");
-  assert.equal(byPath["/news/latest"].price_usd, "0.003");
-  assert.equal(byPath["/news/digest"].price_usd, "0.01");
+  assert.equal(byPath["/ru/fx"].price_usd, "0.001");
+  assert.equal(byPath["/news/latest"].price_usd, "0.0015");
+  assert.equal(byPath["/news/digest"].price_usd, "0.005");
   for (const p of body.prices) {
     assert.equal(p.method, "GET");
     assert.match(p.price_usd, /^\d+(\.\d+)?$/);
